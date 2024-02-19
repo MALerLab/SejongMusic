@@ -792,7 +792,7 @@ class OrchestraScore(ShiftedAlignedScore):
     self.dynamic_template[9.0] =  'middle'
     self.dynamic_template[21.0] =  'middle'
     super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate, start_part_idx=1)
-    self.era_dataset = ShiftedAlignedScore(xml_path=Path(xml_path).parent/'0_edited.musicxml', is_valid=is_valid, min_meas=min_meas, max_meas=max_meas, feature_types=feature_types, slice_measure_num=slice_measure_num)
+    self.era_dataset = ShiftedAlignedScore(xml_path=Path(xml_path).parent/'yeominlak.musicxml', is_valid=is_valid, min_meas=min_meas, max_meas=max_meas, feature_types=feature_types, slice_measure_num=slice_measure_num)
     valid_list = list(range(len(self.parts)))
     self.result_pairs = [[7, b] for b in valid_list]
     self.result_pairs = [pair+[i]  for pair in self.result_pairs for i in self.slice_info]
