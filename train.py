@@ -74,6 +74,9 @@ def main(config: DictConfig):
   valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=pack_collate, drop_last=True)
   test_loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False, collate_fn=pack_collate, drop_last=True)
 
+  tokenizer_vocab_path = save_dir / 'tokenizer_vocab.json'
+  
+  
   device = 'cuda'
 
   measure_match_exp = []
@@ -103,12 +106,15 @@ def main(config: DictConfig):
           model.tokenizer.tok2idx['offset_fraction'][Fraction(i, 3)] = model.tokenizer.tok2idx['offset_fraction'][Fraction(other_value, 3)]
 
 
-
     model.is_condition_shifted = (config.dataset_class == "ShiftedAlignedScore")
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.lr)
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.99)
     scheduler = None
     save_dir.mkdir(parents=True, exist_ok=True)
+    with open(save_dir / 'config.yaml', 'w') as f:
+      OmegaConf.save(config, f)
+    train_dataset.tokenizer.save_to_json(tokenizer_vocab_path)
+
     loss_fn = nll_loss
 
     if config.dataset_class == "SamplingScore":

@@ -12,7 +12,7 @@ from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence, pack_padded_
 from .constants import get_dynamic, MEAS_LEN_BY_IDX
 from .yeominrak_processing import Tokenizer
 from .metric import convert_dynamics_to_integer, make_dynamic_template
-
+from .module import PackedDropout
 
 def read_yaml(yml_path):
     with open(yml_path, 'r') as f:
@@ -54,7 +54,7 @@ class MultiEmbedding(nn.Module):
     return torch.cat([module(x[..., i]) for i, module in enumerate(self.layers)], dim=-1)
 
   def get_embedding_size(self, vocab_sizes, vocab_param):
-    embedding_sizes = [getattr(vocab_param, vocab_key) for vocab_key in vocab_sizes.keys()]
+    embedding_sizes = [getattr(vocab_param, vocab_key) for vocab_key in vocab_sizes.keys() if vocab_key != 'offset_fraction']
     return embedding_sizes
   
   @property
@@ -303,6 +303,15 @@ class Encoder(nn.Module):
       else:
         out = out.view(out.shape[0], out.shape[1], 2, -1).mean(dim=2)
     return out, last_hidden
+  
+class EncoderWithDropout(Encoder):
+  def __init__(self, vocab_size_dict: dict, config):
+    super().__init__(vocab_size_dict, config)
+    self.emb_dropout = PackedDropout(config.emb_dropout)
+  
+  def _get_embedding(self, input_seq):
+    x = super()._get_embedding(input_seq)
+    return self.emb_dropout(x)
 
 class Decoder(nn.Module):
   def __init__(self, vocab_size_dict: dict, param):
@@ -593,6 +602,23 @@ class QkvAttnSeq2seq(AttentionSeq2seq):
   def _decode_inference_result(self, src, output, other_out):
     return self.converter(src[1:-1]), self.converter(output), other_out
 
+  def _run_inference_on_step(self, emb, last_hidden, encode_out):
+    decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+    attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+    combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+    
+    return combined_value, last_hidden , attention_weight
+
+  def _apply_prev_generation(self, prev_generation, final_tokens, last_hidden, encode_out):
+    emb = self.decoder._get_embedding(prev_generation)
+    _, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+    dev = emb.device
+    start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
+    final_tokens.append(start_token)
+    current_measure_idx = 2
+
+    return final_tokens, current_measure_idx, last_hidden
+
   @torch.inference_mode()
   def inference(self, src, part_idx):
     dev = src.device
@@ -668,11 +694,12 @@ class QkvAttnSeq2seq(AttentionSeq2seq):
 
     final_tokens = []
     if prev_generation is not None:
-      emb = self.decoder._get_embedding(prev_generation)
-      decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
-      start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
-      final_tokens.append(start_token)
-      current_measure_idx = 2
+      final_tokens, current_measure_idx, last_hidden = self._apply_prev_generation(prev_generation, final_tokens, last_hidden, encode_out)
+      # emb = self.decoder._get_embedding(prev_generation)
+      # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+      # start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
+      # final_tokens.append(start_token)
+      # current_measure_idx = 2
     selected_token = start_token
     current_beat = Fraction(0, 1)
 
@@ -681,9 +708,10 @@ class QkvAttnSeq2seq(AttentionSeq2seq):
     triplet_sum = 0 
     for i in range(300):
       emb = self.decoder._get_embedding(selected_token)
-      decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
-      attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
-      combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+      # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+      # attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+      # combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+      combined_value, last_hidden, attention_weight = self._run_inference_on_step(emb, last_hidden, encode_out)
       selected_token = self.decoder.sampling_process(combined_value, not_triplet_vocab_list)
       
       if selected_token[0, 0]==self.tokenizer.tok2idx['pitch']['end'] or selected_token[0, 1]==self.tokenizer.tok2idx['duration']['end']:
@@ -751,6 +779,39 @@ class QkvAttnSeq2seq(AttentionSeq2seq):
       attention_vectors = pack_padded_sequence(attention_vectors, target_lens, batch_first=True, enforce_sorted=False)
       
     return attention_vectors, attention_weight 
+
+
+class QkvAttnSeq2seqMore(QkvAttnSeq2seq):
+  def __init__(self, vocab, config):
+    super().__init__(vocab, config)
+    self.encoder = EncoderWithDropout(self.vocab_size_dict, self.config)
+    self.decoder = QkvAttnDecoderMore(self.vocab_size_dict, self.config)
+
+  def _run_inference_on_step(self, emb, last_hidden, encode_out):
+    if not isinstance(last_hidden, list):
+      last_hidden = [last_hidden, None]
+    decode_out, last_hidden[0] = self.decoder.rnn(emb.unsqueeze(0), last_hidden[0])
+    attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+    combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+    combined_value, last_hidden[1] = self.decoder.final_rnn(combined_value, last_hidden[1])
+    
+    return combined_value, last_hidden, attention_weight
+
+  def _apply_prev_generation(self, prev_generation, final_tokens, last_hidden, encode_out):
+    emb = self.decoder._get_embedding(prev_generation)
+    decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+    attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+    combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+    combined_value, last_hidden2 = self.decoder.final_rnn(combined_value)
+    
+    dev = emb.device
+    
+    
+    start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
+    final_tokens.append(start_token)
+    current_measure_idx = 2
+
+    return final_tokens, current_measure_idx, [last_hidden, last_hidden2]
 
 
 
@@ -943,10 +1004,10 @@ class QkvAttnDecoder(nn.Module):
   def _select_token(self, prob: torch.Tensor):
     tokens = []
     # print(prob.shape)
-    pitch_token = prob[0, :, :self.vocab_size[1]].multinomial(num_samples=1)
-    dur_token = prob[0, :, self.vocab_size[1]:].multinomial(num_samples=1)
-    # pitch_token = torch.argmax(prob[0, :, :self.vocab_size[1]], dim=-1, keepdim=True)
-    # dur_token = torch.argmax(prob[0, :, self.vocab_size[1]:], dim=-1, keepdim=True)
+    # pitch_token = prob[0, :, :self.vocab_size[1]].multinomial(num_samples=1)
+    # dur_token = prob[0, :, self.vocab_size[1]:].multinomial(num_samples=1)
+    pitch_token = torch.argmax(prob[0, :, :self.vocab_size[1]], dim=-1, keepdim=True)
+    dur_token = torch.argmax(prob[0, :, self.vocab_size[1]:], dim=-1, keepdim=True)
     return torch.cat([pitch_token, dur_token], dim=-1)
   
   def sampling_process(self, out, not_triplet_vocab_list=None): # 처음에는 encoder_output = last_hidden
@@ -966,9 +1027,14 @@ class QkvAttnDecoderMore(QkvAttnDecoder):
   def __init__(self, vocab_size_dict: dict, param):
     super().__init__(vocab_size_dict, param)
     self.final_rnn = nn.GRU(self.hidden_size + self.gru_size, self.hidden_size, batch_first=True)
+    self.emb_dropout = PackedDropout(param.emb_dropout)
 
   def _make_projection_layer(self):
     self.proj = nn.Linear(self.hidden_size, self.vocab_size[1] + self.vocab_size[2])
+
+  def _get_embedding(self, input_seq):
+    x = super()._get_embedding(input_seq)
+    return self.emb_dropout(x)
 
   def forward(self, src, tgt, enc_hidden_state_by_t, enc_out):
     if enc_out.shape[-1] != self.gru_size:
@@ -990,19 +1056,16 @@ class QkvAttnDecoderMore(QkvAttnDecoder):
     attention_vec = torch.bmm(attention_weight.transpose(1, 2), value)
 
     dec_output = torch.cat([decoder_hidden_states, attention_vec], dim=-1)
+    dec_output = self.emb_dropout(dec_output)  
+
     dec_output, _ = self.final_rnn(dec_output)
+    dec_output = self.emb_dropout(dec_output)
 
     logit = self.proj(dec_output)
 
     prob = self._apply_softmax(logit)
     prob = pack_padded_sequence(prob, target_lens, batch_first=True, enforce_sorted=False)
     return prob, attention_weight
-
-
-class QkvAttnSeq2seqMore(QkvAttnSeq2seq):
-  def __init__(self, vocab, config):
-    super().__init__(vocab, config)
-    self.decoder = QkvAttnDecoderMore(self.vocab_size_dict, self.config)
 
 
 class QkvRollSeq2seq(QkvAttnSeq2seq):

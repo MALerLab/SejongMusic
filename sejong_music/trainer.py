@@ -88,27 +88,27 @@ class Trainer:
       pbar.set_description(f"Acc: {validation_acc:.4f}, Loss: {validation_loss:.4f}")
       if validation_acc > self.best_valid_accuracy:
         self.best_valid_accuracy = validation_acc
-        torch.save(self.model.state_dict(), 'best_model.pt')
+        torch.save(self.model.state_dict(), self.save_dir / 'best_model.pt')
         # print(f'Best Model Saved! Accuracy: {validation_acc}')
       if validation_loss < self.best_valid_loss:
         self.best_valid_loss = validation_loss
-        torch.save(self.model.state_dict(), 'best_loss_model.pt')
+        torch.save(self.model.state_dict(), self.save_dir / 'best_loss_model.pt')
       
       if (epoch + 1) % 100 == 0:
-        torch.save(self.model.state_dict(), f'epoch{epoch+1}_model.pt')
+        torch.save(self.model.state_dict(), self.save_dir / f'epoch{epoch+1}_model.pt')
       
       if (epoch + 1) % 30 == 0 and epoch > 250:
         measure_match, similarity, dynamic_corr = self.make_inference_result()
         if similarity > self.best_pitch_sim:
           self.best_pitch_sim = similarity
-          torch.save(self.model.state_dict(), 'best_pitch_sim_model.pt')
+          torch.save(self.model.state_dict(), self.save_dir / 'best_pitch_sim_model.pt')
         # try:
         #   self.make_inference_result(epoch)
         #   print('Inference Result Saved!')
         # except:
         #   print('Inference Result Failed to Save')
       self.model.to(self.device)
-    torch.save(self.model.state_dict(), 'last_model.pt')
+    torch.save(self.model.state_dict(), self.save_dir / 'last_model.pt')
     return attn_map
 
   
@@ -292,7 +292,7 @@ class Trainer:
     return main_acc, pitch_acc, dur_acc, validation_loss, num_tokens, loss_dict
   
   def load_best_model(self):
-    self.model.load_state_dict(torch.load('best_pitch_sim_model.pt'))
+    self.model.load_state_dict(torch.load(self.save_dir/'best_pitch_sim_model.pt'))
     self.model.eval()
     print('Best Model Loaded!')
 
