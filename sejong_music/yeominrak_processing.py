@@ -922,6 +922,131 @@ class OrchestraScore(ShiftedAlignedScore):
     return src, tgt, shifted_tgt    
 
 
+class OrchestraScoreGMG(OrchestraScore):
+  def __init__(self,xml_path='0_edited.musicxml', 
+                valid_measure_num = [i for i in range(93, 104)],
+                slice_measure_num = 2, 
+                is_valid = False, 
+                use_pitch_modification=False, 
+                pitch_modification_ratio=0.3, 
+                min_meas=3, 
+                max_meas=6,
+                feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
+                sampling_rate=None,
+                target_instrument=None) -> None:
+    super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate)
+    valid_list = list(range(len(self.parts)))
+    self.result_pairs = [[7, b] for b in valid_list]
+    self.result_pairs = [pair+[i]  for pair in self.result_pairs for i in self.slice_info]
+
+  
+  def __getitem__(self, idx):
+    front_part_idx = 7
+    back_part_idx = len(self.parts) - 1
+    if self.is_valid:
+      front_part_idx, _, measure_idx = self.result_pairs[idx]
+      src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, measure_idx)
+      
+      return src, tgt, shifted_tgt
+    
+    src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, idx)          
+    return src, tgt, shifted_tgt    
+
+class OrchestraScoreSeq(ShiftedAlignedScore):
+  def __init__(self,xml_path='0_edited.musicxml', 
+                valid_measure_num = [i for i in range(93, 104)],
+                slice_measure_num = 2, 
+                is_valid = False, 
+                use_pitch_modification=False, 
+                pitch_modification_ratio=0.3, 
+                min_meas=3, 
+                max_meas=6,
+                feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
+                sampling_rate=None,
+                target_instrument=0) -> None:
+    self.dynamic_template = {x/2: 'weak' for x in range(0, 90, 3)}
+    self.dynamic_template[0.0] =  'strong'
+    self.dynamic_template[15.0] =  'strong'
+    self.dynamic_template[9.0] =  'middle'
+    self.dynamic_template[21.0] =  'middle'
+    self.target_instrument = target_instrument
+    super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate, start_part_idx=1)
+    self.condition_instruments = list(range(target_instrument+1, len(self.parts)))
+    if self.is_valid:
+      self.slice_info = [list(range(i, i+self.slice_measure_number)) for i in self.valid_measure_num[:-self.slice_measure_number+1]]
+
+
+  def get_feature(self, part_idx):
+    part = self.parts[part_idx]
+    measure_set = []
+    for measure_idx, measure in enumerate(part.measures):
+        each_measure = []
+        for note in measure:
+            each_measure.append(self._get_feature_by_note(note, part_idx))
+        measure_set.append(each_measure) 
+    return measure_set  
+  
+  def _get_feature_by_note(self, note, part_idx):
+    features = [part_idx+1] # orchestra score starts from 1
+    # if 'pitch' in self.tokenizer.key_types:
+    features.append(note.pitch)
+    # if 'duration' in self.tokenizer.key_types:
+    features.append(note.duration)
+    if 'offset' in self.tokenizer.key_types:
+        features.append(note.measure_offset)
+    if 'dynamic' in self.tokenizer.key_types:
+        features.append(self.dynamic_template.get(note.measure_offset, 'none'))
+    if 'measure_idx' in self.tokenizer.key_types:
+        features.append(note.measure_number)
+    if 'measure_change' in self.tokenizer.key_types:
+        changed = 1 if note.measure_offset == 0.0 else 0
+        features.append(changed)
+    return features
+
+  def fix_part_by_rule(self):
+    return
+
+  def get_processed_feature(self, front_part_idx, back_part_idx, idx):
+      assert isinstance(front_part_idx, list), "front_part_idx should be a list"
+      source_start_token = [front_part_idx[0], 'start', 'start', 'start', 'start', 'start']
+      source_end_token = [front_part_idx[0], 'end', 'end', 'end', 'end', 'end']
+      measure_list = self.slice_info[idx]
+      
+      original_source_list = [item for f_idx in front_part_idx for idx in measure_list for item in self.measure_features[f_idx][idx]]
+      original_target_list = [item for idx in measure_list for item in self.measure_features[back_part_idx][idx]]
+
+      if 'measure_idx' in self.tokenizer.key_types:
+        m_idx_pos = self.tokenizer.key2idx['measure_idx']
+        source_first_measure_idx = original_source_list[0][m_idx_pos]
+        target_first_measure_idx = original_target_list[0][m_idx_pos]
+
+        original_source_list = [note[:m_idx_pos] + [note[m_idx_pos]-source_first_measure_idx] + note[m_idx_pos+1:] for note in original_source_list]
+        original_target_list = [note[:m_idx_pos] + [note[m_idx_pos]-target_first_measure_idx] + note[m_idx_pos+1:] for note in original_target_list]
+      condition_shifted_target = self.shift_condition(original_target_list)
+
+      target_list = condition_shifted_target[: -1]
+
+      if self.use_pitch_modification and not self.is_valid:
+          target_list = self.modify_pitch(target_list)
+      shifted_target_list = condition_shifted_target[1:]
+
+      source_list = [source_start_token] + original_source_list + [source_end_token]
+      
+      source = [self.tokenizer(note_feature) for note_feature in source_list]
+      target = [self.tokenizer(note_feature) for note_feature in target_list]
+      shifted_target = [self.tokenizer(note_feature) for note_feature in shifted_target_list]
+      
+      return torch.LongTensor(source), torch.LongTensor(target), torch.LongTensor(shifted_target)        
+        
+  def __len__(self):
+     return len(self.slice_info)
+
+  def __getitem__(self, idx):
+    front_part_idx = self.condition_instruments
+    back_part_idx = self.target_instrument
+    src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, idx)          
+    return src, tgt, shifted_tgt    
+
 # ------------ Sampling-based --------------- #
 class SamplingTokenizer(Tokenizer):
   def __init__(self, parts, feature_types=['index', 'pitch', 'dynamic',  'offset']):

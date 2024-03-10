@@ -26,10 +26,10 @@ def get_argparse():
   # parser.add_argument('--state_alt_path', type=str, default='outputs/2023-12-20/14-46-58/best_loss_model.pt')
   parser.add_argument('--config_path', type=str, default='yamls/baseline.yaml')
   parser.add_argument('--output_dir', type=str, default='gen_results/')
-  return parser.parse_args()
+  return parser
 
 if __name__ == '__main__':
-  args = get_argparse()
+  args = get_argparse().parse_args()
   # save_name = 'dropout0.5_bestacc'
   # state = torch.load('outputs/2023-12-12/04-08-05/best_model.pt')
 

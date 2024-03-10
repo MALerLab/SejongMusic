@@ -76,44 +76,44 @@ def main(config: DictConfig):
 
   tokenizer_vocab_path = save_dir / 'tokenizer_vocab.json'
   
-  
+  tokenizer = train_dataset.tokenizer
+  if 'offset_fraction' in tokenizer.tok2idx:
+    for i in range(30):
+      if i % 3 == 0:
+        continue
+      if Fraction(i, 3) in tokenizer.tok2idx['offset_fraction']:
+        continue
+      else:
+        if i < 6:
+          other_value = i % 3 + 6
+        else:
+          other_value = i % 3 + 21
+        tokenizer.tok2idx['offset_fraction'][Fraction(i, 3)] = tokenizer.tok2idx['offset_fraction'][Fraction(other_value, 3)]
+
   device = 'cuda'
 
   measure_match_exp = []
   similarity_exp = []
   beat_pitch_match_exp = []
   total_iteration = 0
+  save_dir.mkdir(parents=True, exist_ok=True)
+  with open(save_dir / 'config.yaml', 'w') as f:
+    OmegaConf.save(config, f)
+  train_dataset.tokenizer.save_to_json(tokenizer_vocab_path)
+
 
   for seed_idx in range(config.general.num_exp): # run experiment 5 times with different seed
     random.seed(seed_idx)
     torch.manual_seed(seed_idx)
     torch.cuda.manual_seed(seed_idx)
 
-    model = model_class(train_dataset.tokenizer, config.model).to(device)
-
-    if 'offset_fraction' in model.tokenizer.tok2idx:
-      for i in range(30):
-        if i % 3 == 0:
-          continue
-        if Fraction(i, 3) in model.tokenizer.tok2idx['offset_fraction']:
-          continue
-          print("yes")
-        else:
-          if i < 6:
-            other_value = i % 3 + 6
-          else:
-            other_value = i % 3 + 21
-          model.tokenizer.tok2idx['offset_fraction'][Fraction(i, 3)] = model.tokenizer.tok2idx['offset_fraction'][Fraction(other_value, 3)]
+    model = model_class(tokenizer, config.model).to(device)
 
 
     model.is_condition_shifted = (config.dataset_class == "ShiftedAlignedScore")
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.lr)
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.99)
     scheduler = None
-    save_dir.mkdir(parents=True, exist_ok=True)
-    with open(save_dir / 'config.yaml', 'w') as f:
-      OmegaConf.save(config, f)
-    train_dataset.tokenizer.save_to_json(tokenizer_vocab_path)
 
     loss_fn = nll_loss
 

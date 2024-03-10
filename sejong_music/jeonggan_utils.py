@@ -1,0 +1,138 @@
+from typing import List
+import music21
+
+class JGConverter:
+  def __init__(self):
+    self.PITCH2MIDI = self.define_pitch2midi()
+    self.MIDI2PITCH = {v:k for k,v in self.PITCH2MIDI.items()}
+    self.jeonggan_quarter_length = 1.5
+    self.num_jeonggan_per_gak = 20
+
+  
+  def __call__(self, score: music21.stream.Score):
+    output = []
+    for idx, part in enumerate(score.parts):
+      num_measures = len(part)
+      part_text = []
+      for i in range(1, num_measures):
+        notes_in_measure = list(part.measures(i, i).flat.notes)
+        conv_jgs = self.list_of_m21_notes_to_jeonggan(notes_in_measure)
+        text_jgs = self.jeonggan_note_to_text(conv_jgs)
+        part_text.append('|'.join(text_jgs))
+      output.append('\n'.join(part_text))
+      
+    return output
+
+
+  def list_of_m21_notes_to_jeonggan(self, sel_meas:List[music21.note.Note]): 
+    conv_jgs = [[] for _ in range(self.num_jeonggan_per_gak)]
+    for note in sel_meas:
+      cur_jg = conv_jgs[int(note.offset//self.jeonggan_quarter_length)]
+      jg_offset = note.offset % self.jeonggan_quarter_length
+      cur_jg.append(((self.MIDI2PITCH[note.pitch.midi]), note.duration.quarterLength, jg_offset))
+    return conv_jgs
+
+  @staticmethod
+  def jeonggan_note_to_text(conv_jgs):
+    text_jgs = ['' for _ in range(len(conv_jgs))] 
+    for i, jg in enumerate(conv_jgs):
+      if len(jg) == 0:
+        text_jgs[i] = '0:5'
+
+      if len(jg) != 0 and jg[0][2] != 0:
+        start_pos = jg[0][2]
+        if start_pos == 0.25:
+          text_jgs[i] = '-:1'
+        elif start_pos == 0.5:
+          text_jgs[i] = '-:2'
+        elif start_pos == 0.75:
+          text_jgs[i] = '-:10'
+        elif start_pos == 1.0:
+          text_jgs[i] = '-:2 -:5'
+        elif start_pos == 1.25:
+          text_jgs[i] = '-:2 -:5 -:7'
+        else:
+          print(f"None of the start_pos is matched: {start_pos}")
+
+      for note in jg:
+        if note[2] == 0:
+          if note[1] >= 1.5:
+            text_jgs[i] = f'{note[0]}:5'
+          elif note[1] == 1.0:
+            text_jgs[i] += f'{note[0]}:2 -:5'
+          elif note[1] == 0.75:
+            text_jgs[i] += f'{note[0]}:10'
+          elif note[1] == 0.5:
+            text_jgs[i] += f'{note[0]}:2'
+          elif note[1] == 0.25:
+            text_jgs[i] += f'{note[0]}:1'
+          else:
+            print(f"None of the note[1] is matched while note[2]==0: {note}")
+        elif note[2] == 0.25:
+          if note[1] >= 1.25:
+            text_jgs[i] += f' {note[0]}:3 -:5 -:8'
+          elif note[1] == 1.0:
+            text_jgs[i] += f' {note[0]}:3 -:5 -:7'
+          elif note[1] == 0.75:
+            text_jgs[i] += f' {note[0]}:3 -:5'
+          elif note[1] == 0.5:
+            text_jgs[i] += f' {note[0]}:3 -:4'
+          elif note[1] == 0.25:
+            text_jgs[i] += f' {note[0]}:3'
+          else:
+            print(f"None of the note[1] is matched while note[2]==0.25: {note}")
+        elif note[2] == 0.5:
+          if note[1] >= 1.0:
+            text_jgs[i] += f' {note[0]}:5 -:8'
+          elif note[1] == 0.75:
+            text_jgs[i] += f' {note[0]}:5 -:7'
+          elif note[1] == 0.5:
+            text_jgs[i] += f' {note[0]}:5'
+          elif note[1] == 0.25:
+            text_jgs[i] += f' {note[0]}:4'
+          else:
+            print(f"None of the note[1] is matched while note[2]==0.5: {note}")
+        elif note[2] == 0.75:
+          if note[1] >= 0.75:
+            if text_jgs[i][-2:] == ':4':
+              text_jgs[i] += f' {note[0]}:6 -:8' 
+            else:
+              text_jgs[i] += f' {note[0]}:11'
+          elif note[1] == 0.375:
+            text_jgs[i] += f' {note[0]}:14'
+          elif note[1] == 0.5:
+            if text_jgs[i][-3:] == ':10':
+              text_jgs[i] = text_jgs[i].replace(':10', ':2 -:4')
+            text_jgs[i] += f' {note[0]}:6 -:7'
+          elif note[1] == 0.25:
+            if text_jgs[i][-3:] == ':10':
+              text_jgs[i] = text_jgs[i].replace(':10', ':2 -:4')
+            text_jgs[i] += f' {note[0]}:6'
+          else:
+            print(f"None of the note[1] is matched while note[2]==0.75: {note}")
+        elif note[2] == 1.0:
+          if note[1] >= 0.5:
+            text_jgs[i] += f' {note[0]}:8'
+          elif note[1] == 0.25:
+            text_jgs[i] += f' {note[0]}:7'
+          else:
+            print(f"None of the note[1] is matched while note[2]==1.0: {note}")
+        elif note[2] == 1.25:
+          if note[1] >= 0.25:
+            text_jgs[i] += f' {note[0]}:9'
+          else:
+            print(f"None of the note[1] is matched while note[2]==1.25: {note}")
+        else:
+          print(f"None of the note[2] is matched: {note}")
+    return text_jgs
+
+  @staticmethod
+  def define_pitch2midi():
+    pitch2midi = {}
+    pitch_name = ["황" ,'대' ,'태' ,'협' ,'고' ,'중' ,'유' ,'임' ,'이' ,'남' ,'무' ,'응']
+    octave_name = {"하하배": -3, "하배": -2, "배":-1, '':0, '청':+1, '중청':+2}
+
+    for o in octave_name.keys():
+      for i, p in enumerate(pitch_name):
+        pitch2midi[o+p] = i + 63 + octave_name[o] * 12
+    return pitch2midi

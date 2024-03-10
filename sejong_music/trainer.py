@@ -360,7 +360,10 @@ class OrchestraTrainer(Trainer):
   def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None):
     super().__init__(model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log, scheduler)
     self.midi_decoder = OrchestraDecoder(self.valid_loader.dataset.tokenizer)
-    self.source_decoder = MidiDecoder(self.valid_loader.dataset.era_dataset.tokenizer)
+    if hasattr(self.valid_loader.dataset, 'era_dataset'):
+      self.source_decoder = MidiDecoder(self.valid_loader.dataset.era_dataset.tokenizer)
+    else:
+      self.source_decoder = self.midi_decoder
 
     self.dynamic_template = {x/2: 'weak' for x in range(0, 90, 3)}
     self.dynamic_template[0.0] =  'strong'
