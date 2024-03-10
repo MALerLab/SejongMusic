@@ -45,30 +45,36 @@ def main(config: DictConfig):
   model_class = getattr(model_zoo, config.model_class)
 
   train_dataset = dataset_class(is_valid= False, 
-                                xml_path=original_wd/'music_score/yeominlak_orchestration_omr.musicxml',
+                                xml_path=original_wd/'music_score/FullScore_edit3.musicxml',
                                 use_pitch_modification = config.data.use_pitch_modification, 
                                 pitch_modification_ratio=config.data.modification_ratio,
                                 min_meas=config.data.min_meas, 
                                 max_meas=config.data.max_meas,
                                 feature_types=config.model.features,
-                                sampling_rate=config.data.sampling_rate
+                                sampling_rate=config.data.sampling_rate,
+                                target_instrument=config.data.target_instrument
                                 )
   val_dataset = dataset_class(is_valid= True,
                               # valid_measure_num = [i for i in range(93, 99)],
-                              xml_path=original_wd/'music_score/yeominlak_orchestration_omr.musicxml', 
+                              xml_path=original_wd/'music_score/FullScore_edit3.musicxml', 
                               use_pitch_modification=False, 
                               slice_measure_num=config.data.max_meas,
                               min_meas=config.data.min_meas,
                               feature_types=config.model.features,
-                                sampling_rate=config.data.sampling_rate)
+                              sampling_rate=config.data.sampling_rate,
+                              target_instrument=config.data.target_instrument)
+    
 
   train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size , shuffle=True, collate_fn=pack_collate)
   valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=pack_collate, drop_last=True)
 
   device = 'cuda'
   total_iteration = 0
-
-  model = model_class(train_dataset.era_dataset.tokenizer, train_dataset.tokenizer, config.model).to(device)
+  if isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
+    encoder_tokenizer = train_dataset.tokenizer
+  else:
+    encoder_tokenizer = train_dataset.era_dataset.tokenizer
+  model = model_class(encoder_tokenizer, train_dataset.tokenizer, config.model).to(device)
   model.tokenizer.tok2idx.pop('offset_fraction')
   if 'offset' in model.tokenizer.tok2idx:
     for i in range(120):
@@ -83,7 +89,15 @@ def main(config: DictConfig):
   scheduler = None
   save_dir.mkdir(parents=True, exist_ok=True)
   loss_fn = nll_loss
-
+  
+  with open(save_dir / 'config.yaml', 'w') as f:
+    OmegaConf.save(config, f)
+  tokenizer_vocab_path = save_dir / 'tokenizer_vocab.json'
+  train_dataset.tokenizer.save_to_json(tokenizer_vocab_path)
+  if isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
+    train_dataset.tokenizer.save_to_json(save_dir/'era_tokenizer_vocab.json')
+  else:
+    train_dataset.era_dataset.tokenizer.save_to_json(save_dir/'era_tokenizer_vocab.json')
 
   atrainer = OrchestraTrainer(model=model, optimizer=optimizer, 
                     loss_fn=loss_fn, train_loader=train_loader, 
