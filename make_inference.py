@@ -12,73 +12,9 @@ from sejong_music import model_zoo
 from sejong_music.yeominrak_processing import AlignedScore, SamplingScore, pack_collate, ShiftedAlignedScore, TestScore, TestScoreCPH, Tokenizer
 from sejong_music.model_zoo import QkvAttnSeq2seq, get_emb_total_size, QkvAttnSeq2seqMore
 from sejong_music.decode import MidiDecoder
-from torch.utils.data import  DataLoader
+from sejong_music.inference_utils import prepare_input_for_next_part, get_measure_specific_output, fix_measure_idx, fill_in_source, get_measure_shifted_output, recover_beat
 
 
-def get_measure_shifted_output(output: torch.Tensor):
-  for i, token in enumerate(output):
-    if token[-1] == 4: # new measure started:
-      break
-  for j in range(i, len(output)):
-    if output[j][-1] == 6:
-      break
-
-  output_tokens_from_second_measure = output[i:j].clone()
-  output_tokens_from_second_measure[0, 1] = 1
-  output_tokens_from_second_measure[0, 2] = 1
-  output_tokens_from_second_measure[:, 5] -= 1
-  return output_tokens_from_second_measure
-
-
-def prepare_input_for_next_part(outputs_tensor):
-  pred, condition = outputs_tensor[:, :3], outputs_tensor[:, 3:]
-  next_input = torch.cat([torch.cat([pred[0:1], torch.tensor([[3,3,3]])], dim=1) , torch.cat([pred[1:], condition[:-1]], dim=1) ], dim=0)
-  return next_input
-
-def get_measure_specific_output(output:torch.LongTensor, measure_idx_in_token:int):
-  corresp_ids = torch.where(output[:,-1] == measure_idx_in_token)[0] + 1
-  if corresp_ids[-1] >= len(output):
-    print(f"Warning: next measure of {measure_idx_in_token} is not in the output.")
-    corresp_ids[-1] = len(output) - 1
-  return output[corresp_ids]
-
-
-def fix_measure_idx(sample:torch.LongTensor):
-  new_sample = sample.clone()
-  current_measure = 2
-  for note in new_sample:
-    if note[1] in (1, 2): continue
-    if note[3] == 3: # beat_start
-      current_measure += 1
-    note[5] = current_measure
-  return new_sample
-
-def recover_beat(output:torch.LongTensor, tokenizer, recover_amount=5):
-  new_output = output.clone()
-  accum_dur = 0
-  for i, token in enumerate(new_output):
-    accum_dur += tokenizer.vocab['duration'][token[2]]
-    if abs(accum_dur - recover_amount) < 0.1:
-      break
-    elif accum_dur > recover_amount+0.1:
-      print('Exceed!', accum_dur, recover_amount)
-      exceed_amount = accum_dur - recover_amount
-      new_output[i+1, 2] = tokenizer.tok2idx['duration'][round(tokenizer.vocab['duration'][new_output[i+1, 2]] + exceed_amount)]
-      break
-
-
-  return new_output[i+1:]
-
-
-def fill_in_source(src, num_measure):
-  # src: list of token in strings
-  outputs = []
-  for note in src:
-    if note[-1] in range(4-num_measure):
-      continue
-    else:
-      outputs.append(note)
-  return outputs
 
 
 def get_argparse():
@@ -102,8 +38,10 @@ if __name__ == '__main__':
   # state = torch.load('outputs/2023-12-13/11-19-42/best_pitch_sim_model.pt') # best pitch sim model
 
   save_name = f'{args.save_name}_{datetime.datetime.now().strftime("%m%d-%H%M")}'
-  state = torch.load(f'{args.state_dir}/best_pitch_sim_model.pt')
-  state_alt = torch.load(f'{args.state_dir}/best_loss_model.pt')
+  # state = torch.load(f'{args.state_dir}/best_pitch_sim_model.pt')
+  # state_alt = torch.load(f'{args.state_dir}/best_loss_model.pt')
+  state = torch.load(f'{args.state_dir}/last_model.pt')
+  state_alt = torch.load(f'{args.state_dir}/best_pitch_sim_model.pt')
 
   output_dir = Path(args.output_dir)
   output_dir.mkdir(parents=True, exist_ok=True)
@@ -135,7 +73,7 @@ if __name__ == '__main__':
                         valid_measure_num='entire',
                         slice_measure_num=4, transpose=+8, feature_types=config.model.features)
     beat_recover_amount = [3, 3, 3, 3, 3, 3, 3, 3]
-    start_idx = 0
+    start_idx = 1
     target_idx = start_idx + 1
   else:
     raise ValueError(f'Invalid input xml path: {args.input_xml}')
@@ -143,18 +81,18 @@ if __name__ == '__main__':
 
   test_set.tokenizer = tokenizer
 
-  # for i in range(30):
-  #   if i % 3 == 0:
-  #     continue
-  #   if Fraction(i, 3) in model.tokenizer.tok2idx['offset_fraction']:
-  #     continue
-  #     print("yes")
-  #   else:
-  #     if i < 6:
-  #       other_value = i % 3 + 6
-  #     else:
-  #       other_value = i % 3 + 21
-  #     model.tokenizer.tok2idx['offset_fraction'][Fraction(i, 3)] = model.tokenizer.tok2idx['offset_fraction'][Fraction(other_value, 3)]
+  for i in range(30):
+    if i % 3 == 0:
+      continue
+    if Fraction(i, 3) in model.tokenizer.tok2idx['offset_fraction']:
+      continue
+      print("yes")
+    else:
+      if i < 6:
+        other_value = i % 3 + 6
+      else:
+        other_value = i % 3 + 21
+      model.tokenizer.tok2idx['offset_fraction'][Fraction(i, 3)] = model.tokenizer.tok2idx['offset_fraction'][Fraction(other_value, 3)]
 
 
   model_alt = getattr(model_zoo, config.model_class)(model.tokenizer, config.model).to(device)
@@ -176,7 +114,11 @@ if __name__ == '__main__':
   for i in tqdm(range(len(test_set))):
     sample = test_set[i]
     sample[:,0] = start_idx # regard as era 1
-    src, output_decoded, (attention_map, output, new_out) = model.shifted_inference(sample, target_idx, prev_generation=prev_generation)
+    src, output_decoded, (attention_map, output, new_out) = model.shifted_inference(sample, 
+                                                                                    target_idx, 
+                                                                                    prev_generation=prev_generation, 
+                                                                                    fix_first_beat=False, 
+                                                                                    compensate_beat=(beat_recover_amount[sample[0,0]], beat_recover_amount[target_idx]))
     if i % test_set.slice_measure_number == 0:
       srcs.append(src)
     if i == 0:
@@ -186,7 +128,7 @@ if __name__ == '__main__':
       sel_duration = sum([x[2] for x in model.converter(sel_out)])
       if abs(sel_duration - model.tokenizer.measure_duration[target_idx]) > 0.001:
         print(f'Generated duration: {sel_duration}, target idx: {target_idx}, Running Alt model inference')
-        src, output_decoded, (attention_map, output, new_out) = model_alt.shifted_inference(sample, target_idx, prev_generation=prev_generation)
+        src, output_decoded, (attention_map, output, new_out) = model_alt.shifted_inference(sample, target_idx, prev_generation=prev_generation, fix_first_beat=False, compensate_beat=(beat_recover_amount[sample[0,0]], beat_recover_amount[target_idx]))
         sel_out = get_measure_specific_output(output, 5) 
         sel_duration = sum([x[2] for x in model.converter(sel_out)])
         assert abs(sel_duration - model.tokenizer.measure_duration[target_idx]) < 0.001
@@ -222,17 +164,19 @@ if __name__ == '__main__':
       sample = next_input[measure_start:measure_end]
       sample = torch.cat([start_token, sample, end_token], dim=0)
       sample = fix_measure_idx(sample)
-      src, output_decoded, (attention_map, output, new_out) = model.shifted_inference(sample, target_idx, prev_generation=prev_generation)
+      assert max(sample[:,-1]) == 6, f"Last measure should be idx6, 4th measure {max(sample[:,-1])} \n{sample}"
+      src, output_decoded, (attention_map, output, new_out) = model.shifted_inference(sample, target_idx, prev_generation=prev_generation, fix_first_beat=False, compensate_beat=(beat_recover_amount[sample[0,0]], beat_recover_amount[target_idx]))
 
       if i == 0:
         sel_out = torch.cat([output[0:1]] + [get_measure_specific_output(output, i) for i in range(3,6)], dim=0)
       else:
         sel_out = get_measure_specific_output(output, 5) 
         sel_duration = sum([x[2] for x in model.converter(sel_out)])
-        if abs(sel_duration - model.tokenizer.measure_duration[target_idx]) > 0.001:
+        while abs(sel_duration - model.tokenizer.measure_duration[target_idx]) > 0.001:
           print(f'Generated duration: {sel_duration}, target idx: {target_idx}, Running Alt model inference')
-          src, output_decoded, (attention_map, output, new_out) = model_alt.shifted_inference(sample, target_idx, prev_generation=prev_generation)
+          src, output_decoded, (attention_map, output, new_out) = model_alt.shifted_inference(sample, target_idx, prev_generation=prev_generation, fix_first_beat=False, compensate_beat=(beat_recover_amount[sample[0,0]], beat_recover_amount[target_idx]))
           sel_out = get_measure_specific_output(output, 5) 
+          sel_duration = sum([x[2] for x in model.converter(sel_out)])
       
       prev_generation = get_measure_shifted_output(output)
       outputs.append(sel_out)
