@@ -37,7 +37,9 @@ if __name__ == "__main__":
   inst_codes = ['gmg', 'gyg', 'hg', 'pr', 'dg']
   states = {}
   configs = {}
-  gmg_config = OmegaConf.load(f'{args.gmg_state_dir}/config.yaml')
+  # gmg_config = OmegaConf.load(f'{args.gmg_state_dir}/config.yaml')
+  gmg_config = '/home/danbi/userdata/DANBI/gugakwon/SejongMusic/yamls/orchestration.yaml'
+
   for inst_code in inst_codes:
     state_dir = getattr(args, f'{inst_code}_state_dir')
     states[inst_code] = torch.load(f'{state_dir}/epoch600_model.pt')

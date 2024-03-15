@@ -1,5 +1,6 @@
 from typing import List, Union
 import numpy as np
+# from .constants import MEAS_LEN_BY_IDX
 from .constants import MEAS_LEN_BY_IDX
 
 def make_dynamic_template(offset_list=MEAS_LEN_BY_IDX, beat_sampling_num=6):
