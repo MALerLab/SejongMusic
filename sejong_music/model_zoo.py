@@ -12,11 +12,12 @@ from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence, pack_padded_
 from .constants import get_dynamic, MEAS_LEN_BY_IDX
 from .yeominrak_processing import Tokenizer
 from .metric import convert_dynamics_to_integer, make_dynamic_template
-from .module import PackedDropout
+from .module import PackedDropout, MultiEmbedding, get_emb_total_size
 from .sampling_utils import nucleus
 from .transformer_module import TransEncoder, TransDecoder
 
 import x_transformers
+
 
 def read_yaml(yml_path):
     with open(yml_path, 'r') as f:
@@ -24,47 +25,8 @@ def read_yaml(yml_path):
     config = OmegaConf.create(yaml_obj)
     return config
 
-def get_emb_total_size(config):
-  emb_param = config.model.emb
-  config.model.features = list(config.model.emb.keys())[1:-1]
-  total_size = 0 
-  for key in config.model.features:
-    size = int(emb_param[key] * emb_param.emb_size)
-    total_size += size
-    emb_param[key] = size
-  emb_param.total_size = total_size
-  # emb_param.measure_starting_point = emb_param['pitch']+emb_param['duration']
-  # emb_param.beat_starting_point = emb_param['pitch']+emb_param['duration']+emb_param['measure']
-  config.model.emb = emb_param
-  return config
 
-class MultiEmbedding(nn.Module):
-  def __init__(self, vocab_sizes: dict, vocab_param) -> None:
-    super().__init__()
-    self.layers = []
-    embedding_sizes = self.get_embedding_size(vocab_sizes, vocab_param)
-    # if isinstance(embedding_sizes, int):
-    #   embedding_sizes = [embedding_sizes] * len(vocab_sizes)
-    # print(embedding_sizes)
-    for vocab_size, embedding_size in zip(vocab_sizes.values(), embedding_sizes):
-      if embedding_size != 0:
-        self.layers.append(nn.Embedding(vocab_size, embedding_size))
-    self.layers = nn.ModuleList(self.layers)
 
-  def forward(self, x):
-    # num_embeddings = torch.tensor([x.num_embeddings for x in self.layers])
-    # max_indices = torch.max(x, dim=0)[0].cpu()
-    # assert (num_embeddings > max_indices).all(), f'num_embeddings: {num_embeddings}, max_indices: {max_indices}'
-    return torch.cat([module(x[..., i]) for i, module in enumerate(self.layers)], dim=-1)
-
-  def get_embedding_size(self, vocab_sizes, vocab_param):
-    embedding_sizes = [getattr(vocab_param, vocab_key) for vocab_key in vocab_sizes.keys() if vocab_key != 'offset_fraction']
-    return embedding_sizes
-  
-  @property
-  def total_size(self):
-    return sum([layer.embedding_dim for layer in self.layers])
-  
 # def get_measure_duration(source, vocab):
 #   measure_set = defaultdict(list)
 #   for i in range(1, len(source)-1):
@@ -72,10 +34,6 @@ class MultiEmbedding(nn.Module):
 #     measure_set[measure].append(vocab.vocab['duration'][source[i, 1].item()])
 #   sum_value = [sum(value) for value in measure_set.values()]
 #   return max(sum_value)
-
-def get_measure_duration(part_idx, vocab):
-  measure_duration_list = [4.0, 8.0, ]
-  return max(sum_value)
 
 class Converter:
   def __init__(self, tokenizer:Tokenizer):
@@ -389,12 +347,6 @@ class Decoder(nn.Module):
     selected_token = self._select_token(prob)
     return selected_token, last_hidden
       
-
-  
-  
-  
-  
-  
   
 # ---------------Attention --------------#
 

@@ -11,7 +11,7 @@ from music21 import stream, environment
 from .metric import get_similarity_with_inference, get_correspondence_with_inference, make_dynamic_template
 from .constants import MEAS_LEN_BY_IDX
 from .inference import sequential_inference
-from .yeominrak_processing import SamplingScore
+# from .yeominrak_processing import SamplingScore
 from .evaluation import fill_pitches
 from .decode import MidiDecoder, OrchestraDecoder
 
@@ -124,10 +124,10 @@ class Trainer:
     dynamic_templates = make_dynamic_template(offset_list=MEAS_LEN_BY_IDX)
     for idx in selected_idx_list:
       sample, _, target = loader.dataset[idx]
-      if isinstance(self.train_loader.dataset, SamplingScore):
-        target = self.model.converter(target)
-      else:
-        target = self.model.converter(target[:-1])
+      # if isinstance(self.train_loader.dataset, SamplingScore):
+      #   target = self.model.converter(target)
+      # else:
+      target = self.model.converter(target[:-1])
       input_part_idx = sample[0][0]
       target_part_idx = target[0][0]
       # if input_part_idx < 2: continue
