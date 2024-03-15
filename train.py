@@ -10,22 +10,24 @@ from torch.utils.data import DataLoader
 from omegaconf import DictConfig, OmegaConf
 
 from sejong_music import yeominrak_processing, model_zoo, trainer
-from sejong_music.yeominrak_processing import pack_collate
+from sejong_music.yeominrak_processing import pack_collate, pad_collate_transformer
 from sejong_music.model_zoo import get_emb_total_size
-from sejong_music.loss import nll_loss, focal_loss
+from sejong_music import loss
+from sejong_music.loss import nll_loss, focal_loss, nll_loss_transformer
 from sejong_music.trainer import Trainer, RollTrainer
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
   return f'{current_time_in_str}_{config.general.exp_name}_{config.dataset_class}_{config.model_class}'
 
-@hydra.main(config_path='./yamls/', config_name='baseline')
+@hydra.main(config_path='./yamls/', config_name='transformer')
 def main(config: DictConfig):
-  config = get_emb_total_size(config)
-  if 'duration' not in config.model.features:
-    config.model.features.append('duration')
-  if 'sampling_rate' in config.data and 'samlping_rate' not in config.model:
-    config.model.sampling_rate = config.data.sampling_rate
+  if not config.model_class == 'TransSeq2seq':
+    config = get_emb_total_size(config)
+    if 'duration' not in config.model.features:
+      config.model.features.append('duration')
+    if 'sampling_rate' in config.data and 'samlping_rate' not in config.model:
+      config.model.sampling_rate = config.data.sampling_rate
 
   if config.general.make_log:
     wandb.init(
@@ -70,9 +72,11 @@ def main(config: DictConfig):
                               min_meas=config.data.min_meas,
                               feature_types=config.model.features,
                                 sampling_rate=config.data.sampling_rate)
-  train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size , shuffle=True, collate_fn=pack_collate)
-  valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=pack_collate, drop_last=True)
-  test_loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False, collate_fn=pack_collate, drop_last=True)
+  collate_fn = getattr(yeominrak_processing, config.collate_fn)
+  
+  train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size , shuffle=True, collate_fn=collate_fn)
+  valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=True)
+  test_loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False, collate_fn=collate_fn, drop_last=True)
 
   tokenizer_vocab_path = save_dir / 'tokenizer_vocab.json'
   
@@ -115,7 +119,7 @@ def main(config: DictConfig):
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.99)
     scheduler = None
 
-    loss_fn = nll_loss
+    loss_fn = config.loss_fn
 
     if config.dataset_class == "SamplingScore":
       trainer_class = "RollTrainer"

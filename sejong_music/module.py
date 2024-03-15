@@ -12,7 +12,19 @@ class PackedDropout(nn.Module):
     if isinstance(x, PackedSequence):
       return PackedSequence(self.dropout(x[0]), x[1], x[2], x[3])
     return self.dropout(x)
+
+class SumEmbedding(nn.Module):
+  def __init__(self, vocab_sizes: dict, emb_size: int) -> None:
+    super().__init__()
+    self.layers = []
+    self.emb_size = emb_size
+    for vocab_size in vocab_sizes.values():
+      self.layers.append(nn.Embedding(vocab_size, self.emb_size))
+    self.layers = nn.ModuleList(self.layers)
   
+  def forward(self, x):
+    return torch.sum(torch.stack([module(x[..., i]) for i, module in enumerate(self.layers)], dim=-1), dim=-1)
+
 class MultiEmbedding(nn.Module):
   def __init__(self, vocab_sizes: dict, vocab_param) -> None:
     super().__init__()
@@ -54,3 +66,4 @@ def get_emb_total_size(config):
   # emb_param.beat_starting_point = emb_param['pitch']+emb_param['duration']+emb_param['measure']
   config.model.emb = emb_param
   return config
+
