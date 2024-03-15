@@ -14,6 +14,9 @@ from .yeominrak_processing import Tokenizer
 from .metric import convert_dynamics_to_integer, make_dynamic_template
 from .module import PackedDropout
 from .sampling_utils import nucleus
+from .transformer_module import TransEncoder, TransDecoder
+
+import x_transformers
 
 def read_yaml(yml_path):
     with open(yml_path, 'r') as f:
@@ -270,6 +273,12 @@ class Seq2seq(nn.Module):
   
       # prob = PackedSequence(prob, x[1], x[2], x[3])
 
+# class TransformerSeq2seq(Seq2seq):
+#   def __init__(self, tokenizer:Tokenizer, config):
+#     super().__init__(tokenizer, config)
+#     self.encoder = 
+
+
 class Encoder(nn.Module):
   def __init__(self, vocab_size_dict: dict, config):
     super().__init__()
@@ -380,8 +389,7 @@ class Decoder(nn.Module):
     selected_token = self._select_token(prob)
     return selected_token, last_hidden
       
-  
-  #----------
+
   
   
   
@@ -1272,7 +1280,22 @@ class QkvRollDecoder(QkvAttnDecoder):
     return prob, attention_weight
 
 
- 
+
+  
+  #-------------Transformer -----------------#
+class TransSeq2seq(nn.Module):
+  def __init__(self, tokenizer, config):
+    super().__init__()
+    self.tokenizer = tokenizer
+    self.vocab_size_dict = self.tokenizer.vocab_size_dict
+    self.encoder = TransEncoder(self.vocab_size_dict, config)
+    self.decoder = TransDecoder(self.vocab_size_dict, config)
+  
+  def forward(self, src, tgt):
+    enc_out, src_mask = self.encoder(src)
+    dec_out = self.decoder(tgt, enc_out, src_mask)
+    return dec_out, _
+
 
 
 

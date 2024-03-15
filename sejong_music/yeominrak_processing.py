@@ -794,18 +794,24 @@ def round_number(number, decimals=3):
     scale = 10.0 ** decimals
     return math.floor(number * scale) / scale
 
-def pad_collate(raw_batch, max_len = 240):
+# def pad_collate(raw_batch, max_len = 240):
+#   # source, target= zip(*raw_batch)[0], zip(*raw_batch)[1]
+#     source, target = zip(*raw_batch)
+#     padded_src = pad_sequence(source, batch_first=True, padding_value=0)
+#     padded_target = pad_sequence(target, batch_first=True, padding_value=0)
+#     if padded_src.shape[1] < max_len:
+#         padded_src = torch.cat([padded_src, torch.zeros(padded_src.shape[0], max_len - padded_src.shape[1], padded_src.shape[2], dtype=torch.long)], dim=1)
+#     if padded_target.shape[1] < max_len:
+#         padded_target = torch.cat([padded_target, torch.zeros(padded_target.shape[0], max_len - padded_target.shape[1], padded_target.shape[2], dtype=torch.long)], dim=1)
+#     return [padded_src, padded_target]
+
+def pad_collate_transformer(raw_batch):
   # source, target= zip(*raw_batch)[0], zip(*raw_batch)[1]
-    source, target = zip(*raw_batch)
+    source, target, shi_target = zip(*raw_batch)
     padded_src = pad_sequence(source, batch_first=True, padding_value=0)
     padded_target = pad_sequence(target, batch_first=True, padding_value=0)
-    if padded_src.shape[1] < max_len:
-        padded_src = torch.cat([padded_src, torch.zeros(padded_src.shape[0], max_len - padded_src.shape[1], padded_src.shape[2], dtype=torch.long)], dim=1)
-    if padded_target.shape[1] < max_len:
-        padded_target = torch.cat([padded_target, torch.zeros(padded_target.shape[0], max_len - padded_target.shape[1], padded_target.shape[2], dtype=torch.long)], dim=1)
-    return [padded_src, padded_target]
-
-
+    shi_target = pad_sequence(shi_target, batch_first=True, padding_value=0)
+    return [padded_src, padded_target, shi_target]
 
 class OrchestraScore(ShiftedAlignedScore):
   def __init__(self,xml_path='0_edited.musicxml', 

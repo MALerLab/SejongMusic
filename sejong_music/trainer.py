@@ -248,8 +248,8 @@ class Trainer:
     tgt = tgt.to(self.device)
     pred, attn_weight = self.model(src, tgt)
     
-    pitch_loss = self.loss_fn(pred.data[:, :self.model.vocab_size[1]], shifted_tgt.data[:, 1])
-    dur_loss = self.loss_fn(pred.data[:, self.model.vocab_size[1]:], shifted_tgt.data[:, 2])
+    pitch_loss = self.loss_fn(pred.data[..., :self.model.vocab_size[1]], shifted_tgt.data[..., 1])
+    dur_loss = self.loss_fn(pred.data[..., self.model.vocab_size[1]:], shifted_tgt.data[..., 2])
     total_loss = (pitch_loss + dur_loss) / 2
     
     loss_dict = {'pitch_loss': pitch_loss.item(), 'dur_loss': dur_loss.item(), 'total_loss': total_loss.item()}
