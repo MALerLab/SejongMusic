@@ -21,7 +21,7 @@ class TransEncoder(nn.Module):
     '''
     x: (batch, seq_len, num_features)
     '''
-    mask = (x != 0)[..., 0] # squeeze num_features dimension
+    mask = (x != 0)[..., -1] # squeeze num_features dimension
     embedding = self.embedding(x)
     return self.layers(embedding, mask=mask), mask
   
@@ -35,7 +35,7 @@ class TransDecoder(nn.Module):
     self._make_projection_layer()
     
   def forward(self, x, enc_out, src_mask):
-    mask = (x != 0)[..., 0]
+    mask = (x != 0)[..., -1]
     embedding = self.embedding(x)
     output = self.layers(embedding, context=enc_out, mask=mask, context_mask=src_mask)
     logit = self.proj(output)

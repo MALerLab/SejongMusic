@@ -23,4 +23,5 @@ def nll_loss_transformer(pred, target, eps=1e-8):
   if target.ndim > 1:
     target = target.flatten()
   mask = target != 0
-  return (-torch.log(pred[torch.arange(len(target)), target] + eps) * mask) / mask.sum()
+  mask = mask.to(pred.device)
+  return (-torch.log(pred[torch.arange(len(target)), target] + eps) * mask).sum() / mask.sum()
