@@ -10,8 +10,9 @@ from torch.utils.data import DataLoader
 from omegaconf import DictConfig, OmegaConf
 
 from sejong_music import yeominrak_processing, model_zoo, trainer
-from sejong_music.yeominrak_processing import pack_collate, pad_collate_transformer
 from sejong_music.model_zoo import get_emb_total_size
+# from sejong_music.utils import pack_collate, pad_collate_transformer
+from sejong_music import utils
 from sejong_music import loss
 from sejong_music.loss import nll_loss, focal_loss, nll_loss_transformer
 from sejong_music.trainer import Trainer, RollTrainer
@@ -32,7 +33,7 @@ def main(config: DictConfig):
   if config.general.make_log:
     wandb.init(
       project="yeominrak", 
-      entity="dasaem", 
+      entity="danbinaerin", 
       name = make_experiment_name_with_date(config), 
       config = OmegaConf.to_container(config)
     )
@@ -72,7 +73,7 @@ def main(config: DictConfig):
                               min_meas=config.data.min_meas,
                               feature_types=config.model.features,
                                 sampling_rate=config.data.sampling_rate)
-  collate_fn = getattr(yeominrak_processing, config.collate_fn)
+  collate_fn = getattr(utils, config.collate_fn)
   
   train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size , shuffle=True, collate_fn=collate_fn)
   valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=True)
@@ -119,7 +120,7 @@ def main(config: DictConfig):
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.99)
     scheduler = None
 
-    loss_fn = config.loss_fn
+    loss_fn = getattr(loss, config.loss_fn)
 
     if config.dataset_class == "SamplingScore":
       trainer_class = "RollTrainer"
