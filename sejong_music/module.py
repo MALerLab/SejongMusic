@@ -1,6 +1,10 @@
+from typing import List
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import PackedSequence
+
+from .yeominrak_processing import Tokenizer
+
 
 class PackedDropout(nn.Module):
   def __init__(self, p=0.25):
@@ -67,3 +71,47 @@ def get_emb_total_size(config):
   config.model.emb = emb_param
   return config
 
+
+class Converter:
+  def __init__(self, tokenizer:Tokenizer):
+    self.tokenizer = tokenizer
+    
+  def _convert_note(self, note:List[int]):
+    key_types = self.tokenizer.key_types[:len(note)]
+    return [self.tokenizer.vocab[key][note[i]] for i, key in enumerate(key_types)]
+
+    # return [int(note[0]), self.vocab['pitch'][note[1]], self.vocab['duration'][note[2]], self.vocab['offset'][note[3]], self.vocab['dynamic'][note[4]], self.vocab['measure_change'][note[5]]]
+
+  def __call__(self, output):
+    # print(output) # tensor([[7, 6, 6, 3, 3]])
+
+    return [self._convert_note(note) for note in output]
+  
+class RollConverter(Converter):
+  def __init__(self, tokenizer:Tokenizer, sampling_rate=2):
+    super().__init__(tokenizer)
+    self.sampling_rate = sampling_rate
+
+  def convert_to_note_event(self, frame_list):
+    note_list = []
+    prev_pitch = 0
+    note_duration = 0
+    part_idx = frame_list[0][0]
+    for frame in frame_list:
+      _, pitch = frame
+      if pitch == 0:
+        note_duration += 1
+        continue
+      else:
+        if prev_pitch != 0:
+          note_list.append([part_idx, prev_pitch, note_duration / self.sampling_rate])
+        prev_pitch = pitch
+        note_duration = 1
+    if prev_pitch != 0:
+      note_list.append([part_idx, prev_pitch, note_duration / self.sampling_rate])
+    return note_list
+  
+  def __call__(self, output): #[pitch, in_onset]
+    converted = [self._convert_note(note) for note in output]
+    converted = self.convert_to_note_event(converted)
+    return converted

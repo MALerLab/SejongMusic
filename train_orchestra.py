@@ -31,7 +31,7 @@ def main(config: DictConfig):
   if config.general.make_log:
     wandb.init(
       project="yeominrak", 
-      entity="dasaem", 
+      entity="maler", 
       name = make_experiment_name_with_date(config), 
       config = OmegaConf.to_container(config)
     )
@@ -46,7 +46,7 @@ def main(config: DictConfig):
   dataset_class = getattr(yeominrak_processing, config.dataset_class)
   model_class = getattr(model_zoo, config.model_class)
   train_dataset = dataset_class(is_valid= False, 
-                                xml_path='/home/danbi/userdata/DANBI/gugakwon/SejongMusic/music_score/FullScore_edit3.musicxml',
+                                xml_path=original_wd/'music_score/FullScore_edit5.musicxml',
                                 use_pitch_modification = config.data.use_pitch_modification, 
                                 pitch_modification_ratio=config.data.modification_ratio,
                                 min_meas=config.data.min_meas, 
@@ -58,7 +58,7 @@ def main(config: DictConfig):
                                 )
   val_dataset = dataset_class(is_valid= True,
                               # valid_measure_num = [i for i in range(93, 99)],
-                              xml_path=original_wd/'music_score/FullScore_edit3.musicxml', 
+                              xml_path=original_wd/'music_score/FullScore_edit5.musicxml', 
                               use_pitch_modification=False, 
                               slice_measure_num=config.data.max_meas,
                               min_meas=config.data.min_meas,

@@ -13,7 +13,7 @@ from .utils import SimpleNote, Part, Gnote, make_offset_set, as_fraction, Fracti
 from .tokenizer import Tokenizer
 
 class AlignedScore:
-  def __init__(self, xml_path='0_edited.musicxml', 
+  def __init__(self, xml_path='music_score/yeominlak.musicxml', 
                valid_measure_num = [i for i in range(93, 104)],
                slice_measure_num = 2, 
                is_valid = False, 
@@ -26,6 +26,7 @@ class AlignedScore:
                start_part_idx=0) -> None:
         
     self.score = converter.parse(xml_path)
+    # self.parts = [Part(part, i+start_part_idx) for i, part in enumerate(self.score.parts)]
     if Path(xml_path).with_suffix('.pkl').exists():
         self.parts = pickle.load(open(Path(xml_path).with_suffix('.pkl'), 'rb'))
     else:
@@ -523,7 +524,7 @@ class TestScoreCPH(TestScore):
 
 
 class OrchestraScore(ShiftedAlignedScore):
-  def __init__(self,xml_path='music_score/FullScore_edit3.musicxml', 
+  def __init__(self,xml_path='music_score/FullScore_edit5.musicxml', 
                 valid_measure_num = [i for i in range(93, 104)],
                 slice_measure_num = 2, 
                 is_valid = False, 
@@ -779,3 +780,4 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
     back_part_idx = self.target_instrument
     src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, idx)          
     return src, tgt, shifted_tgt    
+

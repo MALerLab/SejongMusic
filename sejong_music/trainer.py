@@ -8,7 +8,8 @@ import wandb
 from pathlib import Path
 from music21 import stream, environment
 
-from .metric import get_similarity_with_inference, get_correspondence_with_inference, make_dynamic_template
+from .metric import get_similarity_with_inference, get_correspondence_with_inference
+from .utils import make_dynamic_template
 from .constants import MEAS_LEN_BY_IDX
 from .inference import sequential_inference
 # from .yeominrak_processing import SamplingScore

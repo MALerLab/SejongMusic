@@ -1,7 +1,7 @@
 import torch
 from music21 import stream
 from .model_zoo import Seq2seq
-from .metric import convert_note_to_sampling, convert_onset_to_sustain_token
+from .utils import convert_note_to_sampling, convert_onset_to_sustain_token
 
 def sequential_inference(model:Seq2seq, sample:torch.Tensor, decoder):
   s = stream.Score(id='mainScore')
