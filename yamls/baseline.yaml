@@ -8,8 +8,8 @@ param_yaml: 'yeominrak_feature_ratio.yaml'
 
 dataset_class: ShiftedAlignedScore
 model_class: QkvAttnSeq2seq
-
-
+loss_fn: nll_loss
+collate_fn: pack_collate
 data:
   use_pitch_modification: True
   modification_ratio: 0.3

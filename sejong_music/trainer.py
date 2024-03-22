@@ -8,10 +8,11 @@ import wandb
 from pathlib import Path
 from music21 import stream, environment
 
-from .metric import get_similarity_with_inference, get_correspondence_with_inference, make_dynamic_template
+from .metric import get_similarity_with_inference, get_correspondence_with_inference
+from .utils import make_dynamic_template
 from .constants import MEAS_LEN_BY_IDX
 from .inference import sequential_inference
-from .yeominrak_processing import SamplingScore
+# from .yeominrak_processing import SamplingScore
 from .evaluation import fill_pitches
 from .decode import MidiDecoder, OrchestraDecoder
 
@@ -124,10 +125,10 @@ class Trainer:
     dynamic_templates = make_dynamic_template(offset_list=MEAS_LEN_BY_IDX)
     for idx in selected_idx_list:
       sample, _, target = loader.dataset[idx]
-      if isinstance(self.train_loader.dataset, SamplingScore):
-        target = self.model.converter(target)
-      else:
-        target = self.model.converter(target[:-1])
+      # if isinstance(self.train_loader.dataset, SamplingScore):
+      #   target = self.model.converter(target)
+      # else:
+      target = self.model.converter(target[:-1])
       input_part_idx = sample[0][0]
       target_part_idx = target[0][0]
       # if input_part_idx < 2: continue
@@ -248,8 +249,12 @@ class Trainer:
     tgt = tgt.to(self.device)
     pred, attn_weight = self.model(src, tgt)
     
-    pitch_loss = self.loss_fn(pred.data[:, :self.model.vocab_size[1]], shifted_tgt.data[:, 1])
-    dur_loss = self.loss_fn(pred.data[:, self.model.vocab_size[1]:], shifted_tgt.data[:, 2])
+    if isinstance(pred, PackedSequence):  
+      pitch_loss = self.loss_fn(pred.data[:, :self.model.vocab_size[1]], shifted_tgt.data[:, 1])
+      dur_loss = self.loss_fn(pred.data[:, self.model.vocab_size[1]:], shifted_tgt.data[:, 2])
+    else:
+      pitch_loss = self.loss_fn(pred[..., :self.model.vocab_size[1]], shifted_tgt[..., 1])
+      dur_loss = self.loss_fn(pred[..., self.model.vocab_size[1]:], shifted_tgt[..., 2])
     total_loss = (pitch_loss + dur_loss) / 2
     
     loss_dict = {'pitch_loss': pitch_loss.item(), 'dur_loss': dur_loss.item(), 'total_loss': total_loss.item()}
@@ -278,9 +283,19 @@ class Trainer:
   def get_valid_loss_from_single_batch(self, batch):
     src, _, shifted_tgt = batch
     loss, pred, loss_dict, attention_weight = self.get_loss_from_single_batch(batch)
-    num_tokens = pred.data.shape[0]
-    pitch_acc = float(torch.sum(torch.argmax(pred.data[:, :self.model.vocab_size[1]], dim=-1) == shifted_tgt.to(self.device).data[:,1])) / num_tokens
-    dur_acc = float(torch.sum(torch.argmax(pred.data[:, self.model.vocab_size[1]:], dim=-1) == shifted_tgt.to(self.device).data[:,2]))  / num_tokens
+    
+    if isinstance(pred, PackedSequence):
+      num_tokens = pred.data.shape[0]
+      pitch_acc = float(torch.sum(torch.argmax(pred.data[..., :self.model.vocab_size[1]], dim=-1) == shifted_tgt.to(self.device).data[...,1])) / num_tokens
+      dur_acc = float(torch.sum(torch.argmax(pred.data[..., self.model.vocab_size[1]:], dim=-1) == shifted_tgt.to(self.device).data[...,2]))  / num_tokens
+    else:
+      mask = shifted_tgt[..., 1] != 0 # 2-dim
+      mask = mask.to(self.device)
+      num_tokens = mask.sum()
+      pitch_acc = float(torch.sum((torch.argmax(pred[..., :self.model.vocab_size[1]], dim=-1) == shifted_tgt.to(self.device)[...,1])*mask)) / num_tokens
+      dur_acc = float(torch.sum((torch.argmax(pred[..., self.model.vocab_size[1]:], dim=-1) == shifted_tgt.to(self.device)[...,2])*mask)) / num_tokens
+
+      
     main_acc = (pitch_acc + dur_acc) / 2
     
     validation_loss = loss.item()

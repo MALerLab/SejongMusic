@@ -16,3 +16,12 @@ def focal_loss(pred, target, eps=1e-8, alpha=0.25, gamma=2):
   
   predicted_prob = pred[torch.arange(len(target)), target]
   return (-alpha * (1 - predicted_prob) ** gamma * torch.log(predicted_prob + eps)).mean()
+
+def nll_loss_transformer(pred, target, eps=1e-8):
+  if pred.ndim == 3:
+    pred = pred.flatten(0, 1)
+  if target.ndim > 1:
+    target = target.flatten()
+  mask = target != 0
+  mask = mask.to(pred.device)
+  return (-torch.log(pred[torch.arange(len(target)), target] + eps) * mask).sum() / mask.sum()

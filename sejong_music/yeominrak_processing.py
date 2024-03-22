@@ -1,296 +1,19 @@
-import copy
-import math
 import random
-import json
-from fractions import Fraction
+import pickle
+import torch
 
-from collections import defaultdict, Counter
 from pathlib import Path
 from typing import List, Set, Dict, Tuple, Union
 
-import music21
 from music21 import converter, stream, note as m21_note 
+
 import torch
-import numpy as np
-from torch.nn.utils.rnn import pack_sequence, PackedSequence, pad_packed_sequence, pack_padded_sequence, pad_sequence 
 
-from .constants import get_dynamic
-from .metric import make_dynamic_template, convert_dynamics_to_integer, convert_note_to_sampling, convert_onset_to_sustain_token
-
-class Gnote:
-    def __init__(self, note: music21.note.Note, part_idx:int) -> None:
-        self.note = [note]  
-
-        self.pitch = note.pitch.ps
-        self.tie = note.tie
-        self.part_idx = part_idx
-        if part_idx == 0:
-            self.pitch -= (9+12) # C4 -> EB2
-        self.measure_number = note.measureNumber
-        self.offset = note.offset
-        self.measure_offset = 0.0 # dummy value, float로 함!(offset: float)
-        # self.duration = sum([note.duration.quarterLength for note in self.note])
-        # self.dynamic = 0.0
-        
-    def __add__(self, note: music21.note.Note):
-        # assert self.pitch == note.pitch.ps
-        self.note.append(note)
-        return self
-
-    @property
-    def duration(self):
-        return sum([note.duration.quarterLength for note in self.note])
-
-    @property
-    def end_measure_number(self):
-        return self.note[-1].measureNumber
-    
-    @property
-    def dynamic(self):
-        return get_dynamic(self.measure_offset, self.part_idx)
-
-    
-    def __repr__(self) -> str:
-        return f'Gnote: {self.pitch}, {self.duration}, {self.measure_offset}, {self.dynamic}'
-
-class SimpleNote:
-    def __init__(self, note: Gnote) -> None:
-        self.pitch = note.pitch
-        self.duration = note.duration
-        self.offset = note.offset
-        self.measure_offset = note.measure_offset
-        self.measure_number = note.measure_number
-        self.end_measure_number = note.end_measure_number
-        self.part_idx = note.part_idx
-
-    def __repr__(self) -> str:
-        return f'SimpleNote: P:{self.pitch}, D:{self.duration}, M:{self.measure_number}, MO: {self.measure_offset}, Dyn: {self.dynamic}'
-
-    @property
-    def dynamic(self):
-        return get_dynamic(self.measure_offset, self.part_idx)
-
-
-
-
-def apply_tie_but_measure_split(notes: List[music21.note.Note], part_idx) -> List[music21.note.Note]:
-    tied_notes = []
-    previous_measure_number = notes[0].measureNumber
-    # print(previous_measure_number)
-    for note in notes:
-        if note.tie is not None:
-            if note.tie.type == 'start' or note.measureNumber != previous_measure:
-                tied_notes.append(Gnote(note, part_idx))
-            elif note.tie.type == 'continue':
-                tied_notes[-1] +=  note
-            elif note.tie.type == 'stop':
-                tied_notes[-1] += note
-            else:
-                raise ValueError(f'Unknown tie type: {note.tie.type}')
-        else:
-            tied_notes.append(Gnote(note, part_idx))
-        previous_measure = note.measureNumber
-    return tied_notes
-
-def apply_tie(notes: List[music21.note.Note], part_idx) -> List[music21.note.Note]:
-    tied_notes = []
-    for note in notes:
-        if note.tie is not None:
-            if note.tie.type == 'start':
-                tied_notes.append(Gnote(note, part_idx))
-            elif len(tied_notes) == 0:
-                continue
-            elif note.tie.type == 'continue':
-                tied_notes[-1] +=  note
-            elif note.tie.type == 'stop':
-                tied_notes[-1] += note
-            else:
-                raise ValueError(f'Unknown tie type: {note.tie.type}')
-        else:
-            tied_notes.append(Gnote(note, part_idx))
-        
-    return tied_notes
-
-class Part:
-    def __init__(self, part: music21.stream.base.Part, part_idx) -> None:
-        self.part = part
-        self.time_signature = None
-        
-        # self.flattened_notes = [note for note in self.part.flat.notes if note.duration.isGrace == False]
-        self.flattened_notes = [note for note in self.part.flat.notes]
-        # self.used_notes = 
-        self.num_measures = self.flattened_notes[-1].measureNumber - self.flattened_notes[0].measureNumber + 1
-        self.measures = [ [] for _ in range(self.num_measures) ]
-        
-        # self.tie_cleaned_notes = apply_tie(self.flattened_notes, part_idx) # 붙임줄 처리!
-        self.tie_cleaned_notes = apply_tie_but_measure_split(self.flattened_notes, part_idx)
-        for note in self.tie_cleaned_notes:
-            self.measures[note.measure_number-1].append(note)
-        self.measure_duration = self.get_measure_duration()
-        self.measure_offsets = [i * self.measure_duration for i in range(self.num_measures)]
-        self.repair_measure_offset_and_dynamic()
-        self.index = part_idx
-    
-    def repair_measure_offset_and_dynamic(self):
-        # repair offset of self.measures using self.measure_offsets
-        for i, measure in enumerate(self.measures):
-            measure_offset = self.measure_offsets[i]
-            for gnote in measure:
-                gnote_measure = gnote.note[0].getContextByClass(stream.Measure, sortByCreationTime=True)
-                recorded_music21_measure_offset = gnote_measure.offset
-                if measure_offset != recorded_music21_measure_offset:
-                    gnote.offset += measure_offset - recorded_music21_measure_offset
-                gnote.measure_offset = round_number(gnote.offset - measure_offset)
-                # gnote.dynamic = gnote.dynamic
-                
-    def __len__(self):
-        return len(self.measures)
-
-    def get_measure_duration(self):
-        # print(self.measures[0])
-        durations =  [sum([note.duration for note in measure]) for measure in self.measures]
-        # print(durations)
-        most_common_duration = Counter(durations).most_common(1)[0][0]
-        return most_common_duration
-    
-    def convert_to_common_beat(self):
-        common_measures = []
-      
-        if self.measure_duration == 4.0: # 세종 # 5+3(4.0) -> 6+4(12)
-            for i, measure in enumerate(self.measures):
-                for note in measure:
-                    note_measure_offset = note.offset - self.measure_offsets[i]
-                    if note_measure_offset < 2.5:   # 5
-                        converted_offset = note_measure_offset * 12 / 5
-                    else:
-                        converted_offset = (note_measure_offset - 2.5) * 8 / 3 + 6    # 3
-                    converted_note = copy.copy(note)
-                    converted_note.offset = converted_offset + self.measure_offsets[i] * 10 / 4
-                    common_measures.append(converted_note)
-                    
-                    
-        elif self.measure_duration == 8.0: #금합자보
-            for i, measure in enumerate(self.measures): # 10+6(8) -> 6+4(12)
-                for note in measure:
-                    note_measure_offset = note.offset - self.measure_offsets[i]
-                    if note_measure_offset < 5:
-                        converted_offset = note_measure_offset * 6 / 5
-                    else:
-                        converted_offset = (note_measure_offset - 5) * 4 / 3 + 6
-                    converted_note = copy.copy(note)
-                    converted_note.offset = converted_offset + self.measure_offsets[i] * 5 / 4
-                    common_measures.append(converted_note)
-        
-        else:
-            return [note for measure in self.measures for note in measure]
-        return common_measures
-    
-    def make_pitch_contour(self, sampling_rate=12):
-        common_measure = self.convert_to_common_beat()
-        num_frames = len(self) * 10 * sampling_rate
-        # num_frames = 161 * 10 * sampling_rate
-        output = np.zeros(num_frames)
-        # print(output.shape)
-        for i in range(len(common_measure) - 1):
-            note = common_measure[i]
-            next_note = common_measure[i+1]
-            
-            current_offset = note.offset
-            next_offset = next_note.offset
-            
-            current_frame_idx = round(current_offset * sampling_rate)
-            end_frame_idx = round(next_offset * sampling_rate)
-            
-            output[current_frame_idx:end_frame_idx] = note.pitch
-
-        output[end_frame_idx:] = common_measure[-1].pitch
-        
-        return output
-
-class Tokenizer:
-    def __init__(self, parts, feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'], json_fn=None):
-        if json_fn:
-            self.load_from_json(json_fn)
-            return      
-        num_parts = len(parts)
-        self.key_types = feature_types
-        vocab_list = defaultdict(list)
-        vocab_list['index'] = [part.index for part in parts]
-        vocab_list['pitch'] = ['pad', 'start', 'end'] + sorted(list(set([note.pitch for i in range(num_parts) for note in parts[i].tie_cleaned_notes])))
-        vocab_list['duration'] = ['pad', 'start', 'end'] + [8.0] + sorted(list(set([note.duration for i in range(num_parts) for note in parts[i].tie_cleaned_notes])))
-        if 'offset' in feature_types:
-            vocab_list['offset'] = ['pad', 'start', 'end'] + sorted(list(set([note.measure_offset for i in range(num_parts) for note in parts[i].tie_cleaned_notes])))
-        if 'dynamic' in feature_types:
-            vocab_list['dynamic'] = ['pad', 'start', 'end'] + ['strong', 'middle', 'weak', 'none']
-        if 'measure_idx' in feature_types:
-            vocab_list['measure_idx'] = ['pad', 'start', 'end'] + [i for i in range(10)]
-        if 'measure_change' in feature_types:
-            vocab_list['measure_change'] = ['pad', 'start', 'end']  + [0, 1, 2]
-        # vocab_list['offset'] = ['pad', 'start', 'end'] + sorted(list(set([note.measure_offset for i in range(num_parts) for note in parts[i].tie_cleaned_notes])))
-        # vocab_list['dynamic'] = ['pad', 'start', 'end'] + ['strong', 'middle', 'weak']
-        # vocab_list['measure_idx'] = ['pad', 'start', 'end'] + [i for i in range(10)]
-        # vocab_list['measure_change'] = ['pad', 'start', 'end']  + [0, 1, 2]
-        # vocab_list['measure_idx'] = ['pad', 'start', 'end'] + [i for i in range(6)]
-        self.measure_duration = [parts[i].measure_duration for i in range(num_parts)]
-        self.vocab = vocab_list
-        self.vocab_size_dict = {key: len(value) for key, value in self.vocab.items()}
-        self.tok2idx = {key: {k:i for i, k in enumerate(value)} for key, value in self.vocab.items() }
-        if 'offset' in feature_types:
-          self.tok2idx['offset_fraction'] = {Fraction(k).limit_denominator(3):v  for k, v in self.tok2idx['offset'].items() if type(k)==float}
-          self.vocab['offset_fraction'] = [Fraction(k).limit_denominator(3) for k in self.vocab['offset'] if type(k)==float]
-        self.key2idx = {key: i for i, key in enumerate(self.key_types)}
-        # self.key_types = ['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_change']
-
-        self.note2token = {}
-        
-    def save_to_json(self, json_fn):
-        with open(json_fn, 'w') as f:
-            json.dump(self.vocab, f, cls=FractionEncoder)
-    
-    def load_from_json(self, json_fn):
-        with open(json_fn, 'r') as f:
-            self.vocab = json.load(f, object_hook=as_fraction)
-        self.key_types = list(self.vocab.keys())
-        self.vocab_size_dict = {key: len(value) for key, value in self.vocab.items()}
-        self.tok2idx = {key: {k:i for i, k in enumerate(value)} for key, value in self.vocab.items() }
-        # if 'offset' in self.key_types:
-        #   self.tok2idx['offset_fraction'] = {Fraction(k).limit_denominator(3):v  for k, v in self.tok2idx['offset'].items() if type(k)==float}
-        self.key2idx = {key: i for i, key in enumerate(self.key_types)}
-        self.note2token = {}
-        self.measure_duration = [8.0, 8.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]
-            
-
-    def hash_note_feature(self, note_feature:Tuple[Union[int, float, str]]):
-        if note_feature in self.note2token:
-            return self.note2token[note_feature]
-        else:
-            out = [self.tok2idx[self.key_types[i]][element] for i, element in enumerate(note_feature)]
-            self.note2token[note_feature] =  out
-            return out
-        
-    def __call__(self, note_feature:List[Union[int, float, str]]):
-        # converted_lists = [self.tok2idx[self.key_types[i]][element] for i, element in enumerate(note_feature)]
-        converted_lists = self.hash_note_feature(tuple(note_feature))
-        # key_types = ['index', 'pitch', 'duration', 'offset', 'dynamic']
-        # key_types = ['index', 'pitch', 'duration', 'offset', 'dynamic']
-        # converted_lists = [self.tok2idx[self.key_types[i]][element] for i, element in enumerate(note_feature)]
-        
-        return converted_lists
-
-def as_fraction(dct):
-    if "numerator" in dct and "denominator" in dct:
-        return Fraction(dct["numerator"], dct["denominator"])
-    return dct
-
-class FractionEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Fraction):
-            return {'numerator': obj.numerator, 'denominator': obj.denominator}
-        # Let the base class default method raise the TypeError
-        return super().default(obj)
+from .utils import SimpleNote, Part, Gnote, make_offset_set, as_fraction, FractionEncoder, pack_collate, pad_collate, round_number
+from .tokenizer import Tokenizer
 
 class AlignedScore:
-  def __init__(self, xml_path='0_edited.musicxml', 
+  def __init__(self, xml_path='music_score/yeominlak.musicxml', 
                valid_measure_num = [i for i in range(93, 104)],
                slice_measure_num = 2, 
                is_valid = False, 
@@ -303,8 +26,14 @@ class AlignedScore:
                start_part_idx=0) -> None:
         
     self.score = converter.parse(xml_path)
-    self.parts = [Part(part, i+start_part_idx) for i, part in enumerate(self.score.parts)]
+    # self.parts = [Part(part, i+start_part_idx) for i, part in enumerate(self.score.parts)]
+    if Path(xml_path).with_suffix('.pkl').exists():
+        self.parts = pickle.load(open(Path(xml_path).with_suffix('.pkl'), 'rb'))
+    else:
+        self.parts = [Part(part, i+start_part_idx) for i, part in enumerate(self.score.parts)]
+        pickle.dump(self.parts, open(Path(xml_path).with_suffix('.pkl'), 'wb'))
     self.offset_list = [part_list.measure_duration for part_list in self.parts]
+    self.feature_types = feature_types
     self.tokenizer = Tokenizer(self.parts, feature_types)
     self.vocab = self.tokenizer.vocab
     self.vocab_size_dict = self.tokenizer.vocab_size_dict
@@ -428,7 +157,8 @@ class AlignedScore:
       else:
         pitch = note[1]
       # new_note = [note[0], pitch, note[2], note[3], note[4], [note[5]]]
-      new_note = [note[0], pitch, note[2], note[3], note[4], note[5]]
+    #   new_note = [note[0], pitch, note[2], note[3], note[4], note[5]]
+      new_note = [note[0], pitch] + note[2:]
       modified_list.append(new_note)
     completed_list = [target_list[0]] + modified_list + [target_list[-1]]
     return completed_list  
@@ -538,6 +268,8 @@ class ShiftedAlignedScore(AlignedScore):
         last_condition = []
         if 'offset' in self.tokenizer.key_types:
             last_condition.append(0)
+        if 'daegang_offset' in self.tokenizer.key_types:
+            last_condition += [0, 0, 0]
         if 'dynamic' in self.tokenizer.key_types:
             last_condition.append('strong')
         if 'measure_idx' in self.tokenizer.key_types:
@@ -593,6 +325,7 @@ class ShiftedAlignedScore(AlignedScore):
         
         return torch.LongTensor(source), torch.LongTensor(target), torch.LongTensor(shifted_target)        
         
+
 class TestScore(AlignedScore):
     def __init__(self, xml_path='0_edited.musicxml', 
                  valid_measure_num=[i for i in range(93, 104)], 
@@ -788,29 +521,10 @@ class TestScoreCPH(TestScore):
     self.offset_list[0] *= 2
 
     
-def pack_collate(raw_batch):
-  source, target, shifted_target = zip(*raw_batch)
-  return [pack_sequence(source, enforce_sorted=False), pack_sequence(target, enforce_sorted=False), pack_sequence(shifted_target, enforce_sorted=False)]
-
-def round_number(number, decimals=3):
-    scale = 10.0 ** decimals
-    return math.floor(number * scale) / scale
-
-def pad_collate(raw_batch, max_len = 240):
-  # source, target= zip(*raw_batch)[0], zip(*raw_batch)[1]
-    source, target = zip(*raw_batch)
-    padded_src = pad_sequence(source, batch_first=True, padding_value=0)
-    padded_target = pad_sequence(target, batch_first=True, padding_value=0)
-    if padded_src.shape[1] < max_len:
-        padded_src = torch.cat([padded_src, torch.zeros(padded_src.shape[0], max_len - padded_src.shape[1], padded_src.shape[2], dtype=torch.long)], dim=1)
-    if padded_target.shape[1] < max_len:
-        padded_target = torch.cat([padded_target, torch.zeros(padded_target.shape[0], max_len - padded_target.shape[1], padded_target.shape[2], dtype=torch.long)], dim=1)
-    return [padded_src, padded_target]
-
 
 
 class OrchestraScore(ShiftedAlignedScore):
-  def __init__(self,xml_path='0_edited.musicxml', 
+  def __init__(self,xml_path='music_score/FullScore_edit5.musicxml', 
                 valid_measure_num = [i for i in range(93, 104)],
                 slice_measure_num = 2, 
                 is_valid = False, 
@@ -819,18 +533,25 @@ class OrchestraScore(ShiftedAlignedScore):
                 min_meas=3, 
                 max_meas=6,
                 feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
-                sampling_rate=None) -> None:
+                sampling_rate=None,
+                target_instrument=None,
+                is_sep=True) -> None: 
     self.dynamic_template = {x/2: 'weak' for x in range(0, 90, 3)}
     self.dynamic_template[0.0] =  'strong'
     self.dynamic_template[15.0] =  'strong'
     self.dynamic_template[9.0] =  'middle'
     self.dynamic_template[21.0] =  'middle'
+    self.is_sep = is_sep
+    if self.is_sep:
+        offset_index = feature_types.index('offset')
+        feature_types[offset_index:offset_index+1] = ['daegang_offset', 'jeonggan_offset', 'beat_offset']
     super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate, start_part_idx=1)
-    self.era_dataset = ShiftedAlignedScore(xml_path=Path(xml_path).parent/'yeominlak.musicxml', is_valid=is_valid, min_meas=min_meas, max_meas=max_meas, feature_types=feature_types, slice_measure_num=slice_measure_num)
+    self.era_dataset = ShiftedAlignedScore(xml_path='/home/danbi/userdata/DANBI/gugakwon/SejongMusic/music_score/yeominlak.musicxml', is_valid=is_valid, min_meas=min_meas, max_meas=max_meas, feature_types=feature_types, slice_measure_num=slice_measure_num)
     valid_list = list(range(len(self.parts)))
     self.result_pairs = [[7, b] for b in valid_list]
     self.result_pairs = [pair+[i]  for pair in self.result_pairs for i in self.slice_info]
-
+    
+    
   def get_feature(self, part_idx):
     part = self.parts[part_idx]
     measure_set = []
@@ -849,6 +570,9 @@ class OrchestraScore(ShiftedAlignedScore):
     features.append(note.duration)
     if 'offset' in self.tokenizer.key_types:
         features.append(note.measure_offset)
+    if self.is_sep:
+        offsets = make_offset_set(note.measure_offset)  # [daegang, jeonggan, beat]
+        features += offsets
     if 'dynamic' in self.tokenizer.key_types:
         features.append(self.dynamic_template.get(note.measure_offset, 'none'))
     if 'measure_idx' in self.tokenizer.key_types:
@@ -862,8 +586,8 @@ class OrchestraScore(ShiftedAlignedScore):
     return
 
   def get_processed_feature(self, front_part_idx, back_part_idx, idx):
-      source_start_token = [front_part_idx, 'start', 'start', 'start', 'start', 'start']
-      source_end_token = [front_part_idx, 'end', 'end', 'end', 'end', 'end']
+      source_start_token = [front_part_idx] + ['start'] * (len(self.feature_types) - 1)
+      source_end_token = [front_part_idx]+ ['end'] * (len(self.feature_types) - 1) 
       if self.is_valid:
           measure_list = idx
       else:    
@@ -923,7 +647,6 @@ class OrchestraScore(ShiftedAlignedScore):
         sample_success = True
     return src, tgt, shifted_tgt    
 
-
 class OrchestraScoreGMG(OrchestraScore):
   def __init__(self,xml_path='0_edited.musicxml', 
                 valid_measure_num = [i for i in range(93, 104)],
@@ -965,18 +688,22 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
                 max_meas=6,
                 feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
                 sampling_rate=None,
-                target_instrument=0) -> None:
-    self.dynamic_template = {x/2: 'weak' for x in range(0, 90, 3)}
+                target_instrument=0,
+                is_sep=True) -> None:
+    self.dynamic_template = {x/2: 'weak' for x in range(0, 60, 3)}
     self.dynamic_template[0.0] =  'strong'
     self.dynamic_template[15.0] =  'strong'
     self.dynamic_template[9.0] =  'middle'
     self.dynamic_template[21.0] =  'middle'
     self.target_instrument = target_instrument
+    self.is_sep = is_sep
+    # if self.is_sep:
+    #     offset_index = feature_types.index('offset')
+    #     feature_types[offset_index:offset_index+1] = ['daegang_offset', 'jeonggan_offset', 'beat_offset']
     super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate, start_part_idx=1)
     self.condition_instruments = list(range(target_instrument+1, len(self.parts)))
     if self.is_valid:
       self.slice_info = [list(range(i, i+self.slice_measure_number)) for i in self.valid_measure_num[:-self.slice_measure_number+1]]
-
 
   def get_feature(self, part_idx):
     part = self.parts[part_idx]
@@ -996,6 +723,9 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
     features.append(note.duration)
     if 'offset' in self.tokenizer.key_types:
         features.append(note.measure_offset)
+    if 'daegang_offset' in self.tokenizer.key_types:
+        offsets = make_offset_set(note.measure_offset)  # [daegang, jeonggan, beat]
+        features += offsets    
     if 'dynamic' in self.tokenizer.key_types:
         features.append(self.dynamic_template.get(note.measure_offset, 'none'))
     if 'measure_idx' in self.tokenizer.key_types:
@@ -1010,8 +740,10 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
 
   def get_processed_feature(self, front_part_idx, back_part_idx, idx):
       assert isinstance(front_part_idx, list), "front_part_idx should be a list"
-      source_start_token = [front_part_idx[0], 'start', 'start', 'start', 'start', 'start']
-      source_end_token = [front_part_idx[0], 'end', 'end', 'end', 'end', 'end']
+    #   source_start_token = [front_part_idx[0], 'start', 'start', 'start', 'start', 'start'] # ['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx']
+    #   source_end_token = [front_part_idx[0], 'end', 'end', 'end', 'end', 'end']
+      source_start_token = [front_part_idx[0]] + ['start'] * (len(self.feature_types) - 1)
+      source_end_token = [front_part_idx[0]]+ ['end'] * (len(self.feature_types) - 1) 
       measure_list = self.slice_info[idx]
       
       original_source_list = [item for f_idx in front_part_idx for idx in measure_list for item in self.measure_features[f_idx][idx]]
@@ -1048,396 +780,4 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
     back_part_idx = self.target_instrument
     src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, idx)          
     return src, tgt, shifted_tgt    
-
-# ------------ Sampling-based --------------- #
-class SamplingTokenizer(Tokenizer):
-  def __init__(self, parts, feature_types=['index', 'pitch', 'dynamic',  'offset']):
-    num_parts = len(parts)
-    self.key_types = feature_types
-    vocab_list = defaultdict(list)
-    vocab_list['index'] = [i for i in range(num_parts)]
-    vocab_list['pitch'] = ['pad', 'start', 'end', 0] + sorted(list(set([note.pitch for i in range(num_parts) for note in parts[i].tie_cleaned_notes])))
-    if 'dynamic' in feature_types:
-        vocab_list['dynamic'] = ['pad', 'start', 'end'] + list(range(7))
-    if 'offset' in feature_types:
-        vocab_list['offset'] = ['pad', 'start', 'end'] + list(range(240))
-
-    self.measure_duration = [parts[i].measure_duration for i in range(num_parts)]
-    self.vocab = vocab_list
-    self.vocab_size_dict = {key: len(value) for key, value in self.vocab.items()}
-    self.tok2idx = {key: {k:i for i, k in enumerate(value)} for key, value in self.vocab.items() }
-    self.key2idx = {key: i for i, key in enumerate(self.key_types)}
-    # self.key_types = ['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_change']
-
-    self.note2token = {}
-
-class ModifiedTokenizer:
-    def __init__(self, parts):
-        num_parts = len(parts)
-        vocab_list = defaultdict(list)
-        vocab_list['index'] = ['pad']+[i for i in range(num_parts)]
-        vocab_list['pitch'] = ['pad'] + sorted(list(set([note.pitch for i in range(num_parts) for note in parts[i].tie_cleaned_notes])))
-        # vocab_list['is_onset'] = ['pad', 'start', 'end'] + [0, 1]
-        vocab_list['is_onset'] = [0, 1]
-        vocab_list['dynamic'] = ['pad'] + ['strong', 'middle', 'weak']
-        
-        self.measure_duration = [parts[i].measure_duration for i in range(num_parts)]
-        self.vocab = vocab_list
-        self.vocab_size_dict = {key: len(value) for key, value in self.vocab.items()}
-        self.tok2idx = {key: {k:i for i, k in enumerate(value)} for key, value in self.vocab.items() }
-
-    def __call__(self, note_feature:list):
-        key_types = ['index', 'pitch', 'is_onset', 'dynamic']
-        converted_lists = [self.tok2idx[key_types[i]][element] for i, element in enumerate(note_feature)]
-        
-        return converted_lists
-
-
-# ---------- Sampling-based ----------- #
-class SamplingScore(AlignedScore):
-  def __init__(self, xml_path='0_edited.musicxml', 
-               valid_measure_num=[i for i in range(93, 104)], 
-               slice_measure_num=2, is_valid=False, 
-               use_pitch_modification=False, 
-               pitch_modification_ratio=0, 
-               min_meas=3, 
-               max_meas=6, 
-               feature_types=[],
-               sampling_rate=2) -> None:
-    super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types)
-    self.sampling_rate = sampling_rate
-    self.dynamic_template_list = make_dynamic_template(beat_sampling_num=self.sampling_rate)
-    self.dynamic_template_list = [convert_dynamics_to_integer(d) for d in self.dynamic_template_list]
-    self.tokenizer = SamplingTokenizer(self.parts)
-
-  def get_processed_feature(self, front_part_idx, back_part_idx, idx):
-    if self.is_valid:
-        measure_list = idx
-    else:    
-        measure_list = self.slice_info[idx]
-
-    for i, idx in enumerate(measure_list):
-        if len(self.measure_features[front_part_idx][idx]) == 0:
-            return torch.LongTensor([]), torch.LongTensor([]), torch.LongTensor([])
-        if len(self.measure_features[back_part_idx][idx]) == 0:
-            return torch.LongTensor([]), torch.LongTensor([]), torch.LongTensor([])
-
-
-    original_source_list = [item for idx in measure_list for item in self.measure_features[front_part_idx][idx]]
-    original_target_list = [item for idx in measure_list for item in self.measure_features[back_part_idx][idx]]
-
-
-    source_roll = convert_note_to_sampling(original_source_list, self.dynamic_template_list, beat_sampling_num=self.sampling_rate)
-    target_roll = convert_note_to_sampling(original_target_list, self.dynamic_template_list, beat_sampling_num=self.sampling_rate)
-
-    source_roll = convert_onset_to_sustain_token(source_roll)
-    target_roll = convert_onset_to_sustain_token(target_roll)
-
-    enc_in = [self.tokenizer(item) for item in source_roll]
-    dec_in = [self.tokenizer(item) for item in target_roll]
-
-    enc_in = torch.tensor(enc_in, dtype=torch.long)
-    dec_in = torch.tensor(dec_in, dtype=torch.long)
-
-    target = dec_in[:, 0:2]
-    dec_in = dec_in[:, [0, 2, 3]]
-
-    return enc_in, dec_in, target
-
-  def __getitem__(self, idx):
-    if self.is_valid:
-      front_part_idx, back_part_idx, measure_idx = self.result_pairs[idx]
-      src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, measure_idx)
-      return src, tgt, shifted_tgt
-    else:    
-      sample_success = False
-      while not sample_success:
-        front_part_idx = random.choice(range(len(self.parts)-1))
-        # back_part_idx should be bigger than front_part_idx
-        back_part_idx = random.randint(front_part_idx + 1, min(len(self.parts) - 1, front_part_idx + 2))
-        src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, idx)          
-        if len(src) > 0 and len(tgt) > 0:
-          sample_success = True
-    return src, tgt, shifted_tgt
-
-
-
-
-class SamplingTestScore(TestScore, SamplingScore):
-  def __init__(self, xml_path='0_edited.musicxml', valid_measure_num=[i for i in range(93, 104)], slice_measure_num=2, 
-               is_valid=False, use_pitch_modification=False, pitch_modification_ratio=0, min_meas=3, max_meas=6, transpose=0, 
-               feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
-               sampling_rate=2) -> None:
-    TestScore.__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, transpose, feature_types)
-    self.sampling_rate = sampling_rate
-    self.dynamic_template_list = make_dynamic_template(beat_sampling_num=self.sampling_rate)
-    self.dynamic_template_list = [convert_dynamics_to_integer(d) for d in self.dynamic_template_list]
-    self.tokenizer = SamplingTokenizer(self.parts)
-
-  def get_processed_feature(self, front_part_idx, back_part_idx, idx):
-    return SamplingScore.get_processed_feature(self, front_part_idx, back_part_idx, idx)
-
-  def __getitem__(self, idx):
-    return SamplingScore.__getitem__(self, idx)
-       
-
-class SamplingScoreOld(AlignedScore):
-    def __init__(self, xml_path='/home/danbi/userdata/DANBI/gugakwon/Yeominrak/0_edited.musicxml', \
-        slice_measure_num = 4, sample_len = 1000, is_valid=False, use_pitch_modification=False, beat_sampling_num=6) -> None:
-        super().__init__(xml_path, slice_measure_num, sample_len, is_valid, use_pitch_modification)
-        self.beat_sampling_num = beat_sampling_num
-        self.tokenizer = SamplingTokenizer(self.parts)
-        self.dynamic_templates = self.make_dynamic_template()
-        self.tokenized_dynamics = []
-        for tem in self.dynamic_templates:
-            temp = [self.tokenizer.tok2idx['dynamic'][i] for i in tem]
-            self.tokenized_dynamics.append(temp)
-        
-        self.converted_features = []
-        for features in self.sliced_features:
-            converted_features = []
-            for feature in features:
-                converted_feature = self.convert_to_sampling(feature)
-                converted_features.append(converted_feature)
-            self.converted_features.append(converted_features)
-
-    def __len__(self):
-        if self.is_valid:
-            return len(self.valid_index)
-        return self.sample_len
-    
-    def convert_to_sampling(self, data):
-        new_data = []
-        for measure in data:
-            new_measure = []
-            for note in measure:
-                frame = int(self.beat_sampling_num * note[2])
-                if note[0]==0:
-                    frame = frame * 2 # beat strength는 절대값?
-                # new_note = [[note[0], note[1], note[4], 1]] + [[note[0], note[1], note[4], 0]]*(frame-1) # [part_idx, pitch, beat strengh, is_onset]
-                new_note = [[note[0], note[1], 1]] + [[note[0], note[1], 0]]*(frame-1)
-                new_measure += new_note
-                
-            dynamic_template = self.dynamic_templates[new_measure[0][0]] #part_idx
-            dynamic_template = dynamic_template * (len(new_measure)//len(dynamic_template))
-            new_measure_with_dynamic = []
-            # print(len(new_measure), len(dynamic_template))
-            for i, frame in enumerate(new_measure):
-                if len(new_measure) == len(dynamic_template):
-                    new_frame = frame+[dynamic_template[i]]
-                    new_measure_with_dynamic.append(new_frame)
-                else:
-                    ValueError('len(new_measure) != len(dynamic_template)')
-            new_data.append(new_measure_with_dynamic)
-
-        return new_data
-    
-    def modify_pitch(self, target_list):
-        ratio = 0.3
-        modified_list = []
-        for note in target_list:
-            if random.random() < ratio:
-                pitch = random.choice(self.vocab['pitch'][3:])
-            else:
-                pitch = note[1]
-            new_note = [note[0], pitch, note[2], note[3]]
-            modified_list.append(new_note)
- 
-        return modified_list    
-
-    def make_dynamic_template(self):
-        whole_dynamic_template = []
-        for part_idx in range(len(self.parts)):
-            frame = self.beat_sampling_num
-            if part_idx == 0:
-                # 세종실록악보 : 2.5/1.5, 1.5/1/1.5
-                dynamic_mapping = {0.0: 'strong', 2.5: 'strong', 1.5: 'middle', \
-                    0.5: 'weak', 1.0: 'weak', 2.0: 'weak', 3.0: 'weak',3.5: 'weak'}
-                frame = frame * 2 #세종실록인 경우는 frame이 두 배!
-            
-            elif part_idx == 1:
-                # 금합자보: 5/3, 3/2/3
-                dynamic_mapping = {0.0: 'strong', 5.0: 'strong', 3.0: 'middle',\
-                    1.0: 'weak', 2.0: 'weak', 4.0: 'weak', 6.0: 'weak', 7.0: 'weak',}
-            
-            elif part_idx in [2, 3, 4, 5]:
-                # 속악원보, 금보신증가령, 한금신보, 어은보: 6/4, 3/3/2/2 
-                dynamic_mapping = {0.0: 'strong', 6.0: 'strong', 3.0: 'middle', 8.0: 'middle', \
-                    1.0: 'weak', 2.0: 'weak', 4.0: 'weak', 5.0: 'weak', 7.0: 'weak', 9.0: 'weak'}
-            
-            elif part_idx in [6, 7]:
-                # 삼죽금보, 현행: 5/5, 3/2/2/3
-                dynamic_mapping = {0.0: 'strong', 5.0: 'strong', 3.0: 'middle', 7.0: 'middle',\
-                    1.0: 'weak', 2.0: 'weak', 4.0: 'weak', 6.0: 'weak', 8.0: 'weak', 9.0: 'weak'}
-            whole_measure_len = int(frame * self.offset_list[part_idx])
-            dynamic_list = []
-            for i in range(whole_measure_len):
-                dynamic = dynamic_mapping.get(float(i) / frame, 'pad')
-                dynamic_list.append(dynamic)
-            whole_dynamic_template.append(dynamic_list)
-        return whole_dynamic_template
-        
-        
-    def _get_source_and_target(self, front_part_idx, back_part_idx, measure_number):
-
-        original_source_list = []
-        for item in self.converted_features[measure_number][front_part_idx]:
-            if isinstance(item, list):
-                original_source_list.extend(item)
-            else:
-                original_source_list.append(item)
-        original_target_list = []
-        for item in self.converted_features[measure_number][back_part_idx]:
-            if isinstance(item, list):
-                original_target_list.extend(item)
-            else:
-                original_target_list.append(item)
-
-        if self.use_pitch_modification and not self.is_valid:
-            target_original_target_list = self.modify_pitch(original_target_list)
-    
-        source = [self.tokenizer(note_feature) for note_feature in original_source_list]
-        target = [self.tokenizer(note_feature) for note_feature in original_target_list]
-
-        return source, target
-    
-    def get_processed_feature(self, front_part_idx, back_part_idx, measure_number):
-        source, target = self._get_source_and_target(front_part_idx, back_part_idx, measure_number)
-        decoder_input = [[note[0], note[3]] for note in target]
-        target = [[note[1], note[2]] for note in target]
-        
-        return torch.LongTensor(source), torch.LongTensor(decoder_input), torch.LongTensor(target)
-    
-    def __getitem__(self, idx):
-        if self.is_valid:
-            front_part_idx, back_part_idx, measure_number = self.valid_index[idx]
-        else:    
-            front_part_idx = random.choice(range(len(self.parts)-1))
-            back_part_idx = random.choice(range(len(self.parts)-1))
-            measure_number = random.randint(0, len(self.sliced_features[0])-1 - 2) #하드코딩이긴 함...
-        src, tgt, dec_input = self.get_processed_feature(front_part_idx, back_part_idx, measure_number)
-        return src, tgt, dec_input
-    
-
-class SamplingScore2(SamplingScore):
-    def __init__(self, xml_path='/home/danbi/userdata/DANBI/gugakwon/Yeominrak/0_edited.musicxml', \
-        slice_measure_num = 2, sample_len = 1000, is_valid=False, use_pitch_modification=False, beat_sampling_num=6) -> None:
-        super().__init__(xml_path, slice_measure_num, sample_len, is_valid, use_pitch_modification)
-
-    def convert_to_sampling(self, data):
-        new_data = []
-        for measure in data:
-            new_measure = []
-            for note in measure:
-                frame = int(self.beat_sampling_num * note[2])
-                if note[0]==0:
-                    frame = frame * 2 # beat strength는 절대값?
-                # new_note = [[note[0], note[1], note[4], 1]] + [[note[0], note[1], note[4], 0]]*(frame-1) # [part_idx, pitch, beat strengh, is_onset]
-                new_note = [[note[0], note[1], 1]] + [[note[0], 'sustain', 0]]*(frame-1)
-                new_measure += new_note
-                
-            dynamic_template = self.dynamic_templates[new_measure[0][0]] #part_idx
-            dynamic_template = dynamic_template * (len(new_measure)//len(dynamic_template))
-            new_measure_with_dynamic = []
-            # print(len(new_measure), len(dynamic_template))
-            for i, frame in enumerate(new_measure):
-                if len(new_measure) == len(dynamic_template):
-                    new_frame = frame+[dynamic_template[i]]
-                    new_measure_with_dynamic.append(new_frame)
-                else:
-                    ValueError('len(new_measure) != len(dynamic_template)')
-            new_data.append(new_measure_with_dynamic)
-
-        return new_data
-    
-
-
-    def get_processed_feature(self, front_part_idx, back_part_idx, measure_number):
-        source, target = self._get_source_and_target(front_part_idx, back_part_idx, measure_number)
-        # src = [part_idx, pitch, dynamics]
-        decoder_input = [[note[0], note[3]] for note in target] # [part_idx, dynamics]
-        target = [note[1] for note in target] # pitch만!
-        
-        return torch.LongTensor(source), torch.LongTensor(decoder_input), torch.LongTensor(target)
-
-
-
-# ------------------ CNN-based ------------------ #
-
-class CNNScore(SamplingScore):
-    def __init__(self, xml_path='0_edited.musicxml', \
-        slice_measure_num = 2, sample_len = 1000, is_valid=False, use_pitch_modification=False, beat_sampling_num=6) -> None:
-        super().__init__(xml_path, slice_measure_num, sample_len, is_valid, use_pitch_modification)
-        self.tokenizer = ModifiedTokenizer(self.parts)
-    
-    def get_processed_feature(self, front_part_idx, back_part_idx, measure_number):
-        source, target = self._get_source_and_target(front_part_idx, back_part_idx, measure_number)
-        # print(f"target={target}")
-        #source/target's shape = [part_idx, pitch, is_onset, dynamic]
-        fixed_src = [[note[0], note[1]] for note in source]
-        fixed_tgt = [[note[0], note[1]] for note in target]
-        
-        return torch.LongTensor(fixed_src), torch.LongTensor(fixed_tgt)
-    
-    def __getitem__(self, idx):
-        if self.is_valid:
-            front_part_idx, back_part_idx, measure_number = self.valid_index[idx]
-        else:    
-            front_part_idx = random.choice(range(len(self.parts)-1))
-            back_part_idx = random.choice(range(len(self.parts)-1))
-            measure_number = random.randint(0, len(self.sliced_features[0])-1 - 2) #하드코딩이긴 함...
-        src, tgt = self.get_processed_feature(front_part_idx, back_part_idx, measure_number)
-        return src, tgt
-    
-class BasicWork:
-    def __init__(self, xml_path='0_edited.musicxml') -> None:
-        self.xml_path = xml_path
-        self.score = converter.parse(xml_path)
-        self.parts = [Part(part, i) for i, part in enumerate(self.score.parts)]
-        self.tokenizer = Tokenizer(self.parts)
-        self.vocab = self.tokenizer.vocab
-        self.vocab_size_dict = self.tokenizer.vocab_size_dict
-        self.offset_list = [part_list.measure_duration for part_list in self.parts]
-        self.measure_offset_vocab = []
-        self.measure_features = [self.get_feature(i) for i in range(len(self.parts))]
-        max_len = max([len(part) for part in self.measure_features])
-        self.measure_features = [part + [[] for _ in range(max_len - len(part))] for part in self.measure_features]
-        self.part_templates = self._get_part_templates()
-        
-    def get_feature(self, part_idx):
-      part = self.parts[part_idx]
-      measure_set = []
-      for measure_idx, measure in enumerate(part.measures):
-          each_measure = []
-          for note in measure:
-              each_measure.append([part_idx, note.pitch, note.duration, note.measure_offset, note.dynamic])
-          if part_idx in [2,3,4,5,6,7] and sum([note[2] for note in each_measure]) < 10.0:
-              each_measure = []
-          measure_set.append(each_measure) 
-      return measure_set      
-
-    def _get_part_templates(self):
-        whole_part_templates = []
-        for part in self.measure_features:
-            part_templates = []
-            for measure in part:
-                temp = [note[2] for note in measure]
-                part_templates.append(temp)
-            # part_templates = set(tuple(temp) for temp in part_templates)
-            whole_part_templates.append(part_templates)
-        return whole_part_templates
-
-if __name__ == "__main__": 
-    train_dataset = ShiftedAlignedScore(is_valid = False)
-    val_dataset = ShiftedAlignedScore(is_valid = True, slice_measure_num=10)
-
-    for i in range(len(val_dataset)):
-        out = val_dataset[i]
-        if len(out[0]) < 4 or len(out[1]) < 4 or len(out[2]) < 4:
-          print(f"{i}: {len(out[0])}, {len(out[1])}, {len(out[2])}")
-
-    for i in range(len(train_dataset)):
-        out = train_dataset[i]
-        if len(out[0]) < 4 or len(out[1]) < 4 or len(out[2]) < 4:
-          print(f"{i}: {len(out[0])}, {len(out[1])}, {len(out[2])}")
 

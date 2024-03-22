@@ -1,97 +1,99 @@
 from typing import List, Union
 import numpy as np
-from .constants import MEAS_LEN_BY_IDX
+from .utils import convert_note_to_sampling_with_str
 
-def make_dynamic_template(offset_list=MEAS_LEN_BY_IDX, beat_sampling_num=6):
-  whole_dynamic_template = []
-  for part_idx in range(8):
-      frame = beat_sampling_num
-      # if part_idx == 0:
-      #     # 세종실록악보 : 2.5/1.5, 1.5/1/1.5
-      #     dynamic_mapping = {0.0: 'strong', 2.5: 'strong', 1.5: 'middle', \
-      #         0.5: 'weak', 1.0: 'weak', 2.0: 'weak', 3.0: 'weak',3.5: 'weak'}
-      #     # frame = frame * 2 #세종실록인 경우는 frame이 두 배!
+# from .constants import MEAS_LEN_BY_IDX
+
+# def make_dynamic_template(offset_list=MEAS_LEN_BY_IDX, beat_sampling_num=6):
+#   whole_dynamic_template = []
+#   for part_idx in range(8):
+#       frame = beat_sampling_num
+#       # if part_idx == 0:
+#       #     # 세종실록악보 : 2.5/1.5, 1.5/1/1.5
+#       #     dynamic_mapping = {0.0: 'strong', 2.5: 'strong', 1.5: 'middle', \
+#       #         0.5: 'weak', 1.0: 'weak', 2.0: 'weak', 3.0: 'weak',3.5: 'weak'}
+#       #     # frame = frame * 2 #세종실록인 경우는 frame이 두 배!
       
-      if part_idx in [0,1]:
-          # 금합자보: 5/3, 3/2/3
-          dynamic_mapping = {0.0: 'strong', 5.0: 'strong', 3.0: 'middle',\
-              1.0: 'weak', 2.0: 'weak', 4.0: 'weak', 6.0: 'weak', 7.0: 'weak',}
+#       if part_idx in [0,1]:
+#           # 금합자보: 5/3, 3/2/3
+#           dynamic_mapping = {0.0: 'strong', 5.0: 'strong', 3.0: 'middle',\
+#               1.0: 'weak', 2.0: 'weak', 4.0: 'weak', 6.0: 'weak', 7.0: 'weak',}
       
-      elif part_idx in [2, 3, 4, 5]:
-          # 속악원보, 금보신증가령, 한금신보, 어은보: 6/4, 3/3/2/2 
-          dynamic_mapping = {0.0: 'strong', 6.0: 'strong', 3.0: 'middle', 8.0: 'middle', \
-              1.0: 'weak', 2.0: 'weak', 4.0: 'weak', 5.0: 'weak', 7.0: 'weak', 9.0: 'weak'}
+#       elif part_idx in [2, 3, 4, 5]:
+#           # 속악원보, 금보신증가령, 한금신보, 어은보: 6/4, 3/3/2/2 
+#           dynamic_mapping = {0.0: 'strong', 6.0: 'strong', 3.0: 'middle', 8.0: 'middle', \
+#               1.0: 'weak', 2.0: 'weak', 4.0: 'weak', 5.0: 'weak', 7.0: 'weak', 9.0: 'weak'}
       
-      elif part_idx in [6, 7]:
-          # 삼죽금보, 현행: 5/5, 3/2/2/3
-          dynamic_mapping = {0.0: 'strong', 5.0: 'strong', 3.0: 'middle', 7.0: 'middle',\
-              1.0: 'weak', 2.0: 'weak', 4.0: 'weak', 6.0: 'weak', 8.0: 'weak', 9.0: 'weak'}
-      whole_measure_len = int(frame * offset_list[part_idx])
-      dynamic_list = []
-      for i in range(whole_measure_len):
-          dynamic = dynamic_mapping.get(float(i) / frame, 'none')
-          dynamic_list.append(dynamic)
-      whole_dynamic_template.append(dynamic_list)
-  return whole_dynamic_template
+#       elif part_idx in [6, 7]:
+#           # 삼죽금보, 현행: 5/5, 3/2/2/3
+#           dynamic_mapping = {0.0: 'strong', 5.0: 'strong', 3.0: 'middle', 7.0: 'middle',\
+#               1.0: 'weak', 2.0: 'weak', 4.0: 'weak', 6.0: 'weak', 8.0: 'weak', 9.0: 'weak'}
+#       whole_measure_len = int(frame * offset_list[part_idx])
+#       dynamic_list = []
+#       for i in range(whole_measure_len):
+#           dynamic = dynamic_mapping.get(float(i) / frame, 'none')
+#           dynamic_list.append(dynamic)
+#       whole_dynamic_template.append(dynamic_list)
+#   return whole_dynamic_template
 
-def convert_dynamics_to_integer(dynamics):
-  dynamic_mapping = {'strong': 3, 'middle':4 , 'weak':5, 'none': 6}
-  return [dynamic_mapping[d] for d in dynamics]
+# def convert_dynamics_to_integer(dynamics):
+#   dynamic_mapping = {'strong': 3, 'middle':4 , 'weak':5, 'none': 6}
+#   return [dynamic_mapping[d] for d in dynamics]
 
 
-def convert_note_to_sampling_with_str(measure, dynamic_templates, beat_sampling_num=6):
-  if len(measure) == 0:
-    return [['empty'] for _ in range(60)]  # 어차피, 4,5만 비어있으니까 괜찮을 것 같음! 
+# def convert_note_to_sampling_with_str(measure, dynamic_templates, beat_sampling_num=6):
+#   if len(measure) == 0:
+#     return [['empty'] for _ in range(60)]  # 어차피, 4,5만 비어있으니까 괜찮을 것 같음! 
     
-  new_measure = []
-  for note in measure:
-    if note[2] == 0:
-      continue
-    frame = int(beat_sampling_num * note[2])
-    if note[0]==0:
-      frame = frame * 2 # beat strength는 절대값?
-    # [part_idx, pitch, onset]
-    new_note = [[note[0], note[1], 1]] + [[note[0], note[1], 0]]*(frame-1)
-    new_measure += new_note
+#   new_measure = []
+#   for note in measure:
+#     if note[2] == 0:
+#       continue
+#     frame = int(beat_sampling_num * note[2])
+#     if note[0]==0:
+#       frame = frame * 2 # beat strength는 절대값?
+#     # [part_idx, pitch, onset]
+#     new_note = [[note[0], note[1], 1]] + [[note[0], note[1], 0]]*(frame-1)
+#     new_measure += new_note
       
-  dynamic_template = dynamic_templates[new_measure[0][0]] #part_idx
-  dynamic_template = dynamic_template * (len(new_measure)//len(dynamic_template))
-  new_measure_with_dynamic = []
-  # print(len(new_measure), len(dynamic_template))
-  for i, frame in enumerate(new_measure):
-    if len(new_measure) == len(dynamic_template):
-      new_frame = frame+[dynamic_template[i]]
-      new_measure_with_dynamic.append(new_frame)
-    else:
-      ValueError('len(new_measure) != len(dynamic_template)')
-  return new_measure_with_dynamic
+#   dynamic_template = dynamic_templates[new_measure[0][0]] #part_idx
+#   dynamic_template = dynamic_template * (len(new_measure)//len(dynamic_template))
+#   new_measure_with_dynamic = []
+#   # print(len(new_measure), len(dynamic_template))
+#   for i, frame in enumerate(new_measure):
+#     if len(new_measure) == len(dynamic_template):
+#       new_frame = frame+[dynamic_template[i]]
+#       new_measure_with_dynamic.append(new_frame)
+#     else:
+#       ValueError('len(new_measure) != len(dynamic_template)')
+#   return new_measure_with_dynamic
 
-def convert_note_to_sampling(measure, dynamic_templates, beat_sampling_num = 6):
-  if len(measure) == 0:
-    return [['empty'] for _ in range(10 * beat_sampling_num)]  # 어차피, 4,5만 비어있으니까 괜찮을 것 같음! 
+# def convert_note_to_sampling(measure, dynamic_templates, beat_sampling_num = 6):
+#   if len(measure) == 0:
+#     return [['empty'] for _ in range(10 * beat_sampling_num)]  # 어차피, 4,5만 비어있으니까 괜찮을 것 같음! 
   
-  measure_duration = sum([note[2] for note in measure])
-  dynamic_template = dynamic_templates[measure[0][0]] #part_idx
-  num_measures = round(measure_duration * beat_sampling_num / len(dynamic_template))
-  new_measure = np.zeros((int(num_measures * len(dynamic_template)), 5), dtype=np.int32) # part_idx, pitch, onset, dynamic, position
-  new_measure[:, 0] = measure[0][0] # part_idx
-  new_measure[:, 3] = dynamic_template * num_measures
-  new_measure[:, 4] = np.arange(len(new_measure))
-  current_beat = 0
+#   measure_duration = sum([note[2] for note in measure])
+#   dynamic_template = dynamic_templates[measure[0][0]] #part_idx
+#   num_measures = round(measure_duration * beat_sampling_num / len(dynamic_template))
+#   new_measure = np.zeros((int(num_measures * len(dynamic_template)), 5), dtype=np.int32) # part_idx, pitch, onset, dynamic, position
+#   new_measure[:, 0] = measure[0][0] # part_idx
+#   new_measure[:, 3] = dynamic_template * num_measures
+#   new_measure[:, 4] = np.arange(len(new_measure))
+#   current_beat = 0
 
 
-  for note in measure:
-    onset_frame = int(beat_sampling_num * current_beat)
-    offset_frame = int(beat_sampling_num * (current_beat + note[2]))
-    new_measure[onset_frame:offset_frame, 1] = note[1] # pitch
-    new_measure[onset_frame, 2] = 1
-    current_beat += note[2]
+#   for note in measure:
+#     onset_frame = int(beat_sampling_num * current_beat)
+#     offset_frame = int(beat_sampling_num * (current_beat + note[2]))
+#     new_measure[onset_frame:offset_frame, 1] = note[1] # pitch
+#     new_measure[onset_frame, 2] = 1
+#     current_beat += note[2]
 
-  return new_measure
+#   return new_measure
 
-def convert_onset_to_sustain_token(roll_array: np.ndarray):
-  roll_array[roll_array[:,2]!=1, 1] = 0
-  return roll_array[:, [0,1,3,4]]
+# def convert_onset_to_sustain_token(roll_array: np.ndarray):
+#   roll_array[roll_array[:,2]!=1, 1] = 0
+#   return roll_array[:, [0,1,3,4]]
 
 
 def get_similarity(sampled_notes, idx_1, idx_2):

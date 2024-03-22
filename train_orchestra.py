@@ -3,6 +3,7 @@ import random
 import wandb
 import hydra
 from pathlib import Path
+import copy
 
 import torch
 from torch.utils.data import DataLoader
@@ -18,9 +19,10 @@ def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
   return f'{current_time_in_str}_{config.general.exp_name}_{config.dataset_class}_{config.model_class}'
 
-@hydra.main(config_path='./yamls/', config_name='orchestration')
+@hydra.main(config_path='/home/danbi/userdata/DANBI/gugakwon/SejongMusic/yamls', config_name='orchestration')
 def main(config: DictConfig):
   config = get_emb_total_size(config)
+  
   if 'duration' not in config.model.features:
     config.model.features.append('duration')
   if 'sampling_rate' in config.data and 'samlping_rate' not in config.model:
@@ -29,7 +31,7 @@ def main(config: DictConfig):
   if config.general.make_log:
     wandb.init(
       project="yeominrak", 
-      entity="dasaem", 
+      entity="maler", 
       name = make_experiment_name_with_date(config), 
       config = OmegaConf.to_container(config)
     )
@@ -38,29 +40,29 @@ def main(config: DictConfig):
     save_dir = Path('wandb/debug/checkpoints')
 
   original_wd = Path(hydra.utils.get_original_cwd())
-  # if not save_dir.is_absolute():
-  #   save_dir = original_wd / save_dir
+  if not save_dir.is_absolute():
+    save_dir = original_wd / save_dir
 
   dataset_class = getattr(yeominrak_processing, config.dataset_class)
   model_class = getattr(model_zoo, config.model_class)
-
   train_dataset = dataset_class(is_valid= False, 
-                                xml_path=original_wd/'music_score/FullScore_edit3.musicxml',
+                                xml_path=original_wd/'music_score/FullScore_edit5.musicxml',
                                 use_pitch_modification = config.data.use_pitch_modification, 
                                 pitch_modification_ratio=config.data.modification_ratio,
                                 min_meas=config.data.min_meas, 
                                 max_meas=config.data.max_meas,
-                                feature_types=config.model.features,
+                                feature_types=copy.copy(config.model.features),
                                 sampling_rate=config.data.sampling_rate,
-                                target_instrument=config.data.target_instrument
+                                target_instrument=config.data.target_instrument,
+                                is_sep = config.data.is_sep
                                 )
   val_dataset = dataset_class(is_valid= True,
                               # valid_measure_num = [i for i in range(93, 99)],
-                              xml_path=original_wd/'music_score/FullScore_edit3.musicxml', 
+                              xml_path=original_wd/'music_score/FullScore_edit5.musicxml', 
                               use_pitch_modification=False, 
                               slice_measure_num=config.data.max_meas,
                               min_meas=config.data.min_meas,
-                              feature_types=config.model.features,
+                              feature_types=copy.copy(config.model.features),
                               sampling_rate=config.data.sampling_rate,
                               target_instrument=config.data.target_instrument)
     
@@ -75,7 +77,8 @@ def main(config: DictConfig):
   else:
     encoder_tokenizer = train_dataset.era_dataset.tokenizer
   model = model_class(encoder_tokenizer, train_dataset.tokenizer, config.model).to(device)
-  model.tokenizer.tok2idx.pop('offset_fraction')
+  if 'offset_fraction' in model.tokenizer.tok2idx:
+    model.tokenizer.tok2idx.pop('offset_fraction')
   if 'offset' in model.tokenizer.tok2idx:
     for i in range(120):
       if i % 4 == 0:
