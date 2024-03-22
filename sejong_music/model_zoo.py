@@ -58,7 +58,13 @@ class Seq2seq(nn.Module):
     
     if self.is_condition_shifted:
       if 'offset' in self.vocab_size_dict:
-        token_features.append(self.tokenizer.tok2idx['offset'][0])
+        token_features.append(self.tokenizer.tok2idx['offset'][0]) 
+      if 'daegang_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['daegang_offset'][0])
+      if 'jeonggan_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['jeonggan_offset'][0])
+      if 'beat_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['beat_offset'][0])  
       if 'dynamic' in self.vocab_size_dict:
         token_features.append(self.tokenizer.tok2idx['dynamic']['strong'])
       if 'measure_change' in self.vocab_size_dict:
@@ -69,6 +75,12 @@ class Seq2seq(nn.Module):
     
     if 'offset' in self.vocab_size_dict:
       token_features.append(self.tokenizer.tok2idx['offset']['start'])
+    if 'daegang_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['daegang_offset']['start'])
+    if 'jeonggan_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['jeonggan_offset']['start'])
+    if 'beat_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['beat_offset']['start'])  
     if 'dynamic' in self.vocab_size_dict:
       token_features.append(self.tokenizer.tok2idx['dynamic']['start'])
     if 'measure_change' in self.vocab_size_dict:
@@ -115,20 +127,7 @@ class Seq2seq(nn.Module):
       condition_features.append(measure_start_idx)
     return condition_features
 
-  def update_condition_info(self, current_beat, current_measure_idx, measure_duration, current_dur):
-    if current_dur in ('start', 'pad'):
-      current_dur = 0.0
-    current_beat += Fraction(current_dur).limit_denominator(3)
-    if float(current_beat) + 0.1 >= measure_duration:
-      current_measure_idx += 1 #마디 수 늘려주기
-      measure_changed = 1
-      current_beat = current_beat - measure_duration
-      if abs(current_beat) < 0.01:
-        current_beat = 0
-    else:
-      measure_changed = 0
 
-    return current_beat, current_measure_idx, measure_changed
   
   def _get_measure_duration(self, part_idx):
     return self.tokenizer.measure_duration[part_idx]
@@ -185,9 +184,7 @@ class Seq2seq(nn.Module):
 
 class AttentionSeq2seq(Seq2seq):
   def __init__(self, vocab, config):
-    super().__init__(vocab, config)
-    self._make_encoder_and_decoder()  
-    
+    super().__init__(vocab, config)    
     
   def _make_encoder_and_decoder(self):
     self.decoder = AttnDecoder(self.vocab_size_dict, self.config)
@@ -195,10 +192,11 @@ class AttentionSeq2seq(Seq2seq):
   def forward(self, src, tgt):
     enc_out, enc_last_hidden = self.encoder(src)
     dec_out = self.decoder(src, tgt, enc_out, enc_last_hidden)
-     
+  
     return dec_out  
 
 
+  
   def inference(self, src, part_idx):
     with torch.inference_mode():
       
@@ -291,18 +289,25 @@ class QkvAttnSeq2seq(AttentionSeq2seq):
     decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
     attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
     combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
-    
-    return combined_value, last_hidden , attention_weight
+    logit = self.decoder.proj(combined_value)
+    return logit, last_hidden , attention_weight
 
-  def _apply_prev_generation(self, prev_generation, final_tokens, last_hidden, encode_out):
+  def run_encoder(self, src):
+    encode_out, encode_last_hidden = self.encoder(src.unsqueeze(0)) # 
+    last_hidden = encode_last_hidden
+    if last_hidden.shape[-1] != self.decoder.gru_size:
+      last_hidden = self.decoder.reduce_enc(last_hidden)   
+    return {"encode_out": encode_out, "last_hidden": last_hidden} 
+
+  def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output:dict):
     emb = self.decoder._get_embedding(prev_generation)
-    _, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+    _, encoder_output["last_hidden"] = self.decoder.rnn(emb.unsqueeze(0), encoder_output["last_hidden"])
     dev = emb.device
     start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
     final_tokens.append(start_token)
     current_measure_idx = 2
 
-    return final_tokens, current_measure_idx, last_hidden
+    return final_tokens, current_measure_idx, encoder_output
   
 
 
@@ -484,20 +489,23 @@ class QkvAttnSeq2seqMore(QkvAttnSeq2seq):
     self.encoder = EncoderWithDropout(self.vocab_size_dict, self.config)
     self.decoder = QkvAttnDecoderMore(self.vocab_size_dict, self.config)
     
-  def _run_inference_on_step(self, emb, last_hidden, encode_out):
+  def _run_inference_on_step(self, selected_token, encoder_output):
+    last_hidden = encoder_output['last_hidden']
     if not isinstance(last_hidden, list):
       last_hidden = [last_hidden, None]
+    emb = self.decoder._get_embedding(selected_token)
     decode_out, last_hidden[0] = self.decoder.rnn(emb.unsqueeze(0), last_hidden[0])
-    attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+    attention_vectors, attention_weight = self._get_attention_vector(encoder_output["encode_out"], decode_out)
     combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
     combined_value, last_hidden[1] = self.decoder.final_rnn(combined_value, last_hidden[1])
-    
-    return combined_value, last_hidden, attention_weight
+    logit = self.decoder.proj(combined_value)
+    encoder_output['last_hidden'] = last_hidden
+    return logit, encoder_output, attention_weight
 
-  def _apply_prev_generation(self, prev_generation, final_tokens, last_hidden, encode_out):
+  def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output:dict):
     emb = self.decoder._get_embedding(prev_generation)
-    decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
-    attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+    decode_out, encoder_output["last_hidden"] = self.decoder.rnn(emb.unsqueeze(0), encoder_output["last_hidden"])
+    attention_vectors, attention_weight = self._get_attention_vector(encoder_output["encode_out"], decode_out)
     combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
     combined_value, last_hidden2 = self.decoder.final_rnn(combined_value)
     
@@ -507,8 +515,10 @@ class QkvAttnSeq2seqMore(QkvAttnSeq2seq):
     start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
     final_tokens.append(start_token)
     current_measure_idx = 2
+    
+    encoder_output["last_hidden"] = [encoder_output["last_hidden"], last_hidden2]
 
-    return final_tokens, current_measure_idx, [last_hidden, last_hidden2]
+    return final_tokens, current_measure_idx, encoder_output
 
 
 # class QkvAttnSeq2seqOrch(QkvAttnSeq2seq):
@@ -524,10 +534,9 @@ class QkvAttnSeq2seqMore(QkvAttnSeq2seq):
 
 
 class QkvAttnSeq2seqOrch(QkvAttnSeq2seqMore):
-  def __init__(self, enc_tokenizer, dec_tokenizer, config):
-    self.enc_tokenizer = enc_tokenizer
-    super().__init__(dec_tokenizer, config)
-    self.enc_converter = Converter(enc_tokenizer)
+  def __init__(self, tokenizer, config):
+    super().__init__(tokenizer, config)
+    self.converter = Converter(tokenizer)
     self.dynamic_template = {x/2: 'weak' for x in range(0, 90, 3)}
     self.dynamic_template[0.0] =  'strong'
     self.dynamic_template[15.0] =  'strong'
@@ -535,27 +544,20 @@ class QkvAttnSeq2seqOrch(QkvAttnSeq2seqMore):
     self.dynamic_template[21.0] =  'middle'
   
   def _make_encoder_and_decoder(self):
-    self.encoder = EncoderWithDropout(self.enc_tokenizer.vocab_size_dict, self.config)  
+    self.encoder = EncoderWithDropout(self.vocab_size_dict, self.config)  
     self.decoder = QkvAttnDecoderMore(self.vocab_size_dict, self.config)
     
+  # def _make_encoder_and_decoder(self):
+  #   self.encoder = TransEncoder(self.vocab_size_dict, self.config)
+  #   self.decoder = TransDecoder(self.vocab_size_dict, self.config)
+    
   def _decode_inference_result(self, src, output, other_out):
-    return self.enc_converter(src[1:-1]), self.converter(output), other_out
+    return self.converter(src[1:-1]), self.converter(output), other_out
   
   def _get_measure_duration(self, part_idx):
     return 30.0 # Currently fixed to 30
   
-  def update_condition_info(self, current_beat, current_measure_idx, measure_duration, current_dur):
-    if current_dur in ('start', 'pad'):
-      current_dur = 0.0
-    current_beat += current_dur
-    if float(current_beat) >= measure_duration:
-      current_measure_idx += 1 #마디 수 늘려주기
-      measure_changed = 1
-      current_beat = current_beat - measure_duration
-    else:
-      measure_changed = 0
 
-    return current_beat, current_measure_idx, measure_changed
   
   def encode_condition_token(self, part_idx, current_beat, current_measure_idx, measure_start):
     condition_features = []
@@ -602,7 +604,7 @@ class QkvAttnSeq2seqOrch(QkvAttnSeq2seqMore):
     # while True:
     for i in range(500):
       # print("selected token is", selected_token)
-      emb = self.decoder._get_embedding(selected_token)
+      emb = self.decoder._get_embedding(selected_token) 
       combined_value, last_hidden, attention_weight = self._run_inference_on_step(emb, last_hidden, encode_out)
       selected_token = self.decoder.sampling_process(combined_value)
 
@@ -654,8 +656,8 @@ class TransSeq2seq(Seq2seq):
     # self.vocab_size_dict = self.tokenizer.vocab_size_dict
     
   def _make_encoder_and_decoder(self):
-    self.encoder = TransEncoder(self.vocab_size_dict, self.config)
-    self.decoder = TransDecoder(self.vocab_size_dict, self.config)
+    self.encoder = TransEncoder(self.vocab_size_dict, self.config.model)
+    self.decoder = TransDecoder(self.vocab_size_dict, self.config.model)
   
   def forward(self, src, tgt):
     enc_out, src_mask = self.encoder(src)
