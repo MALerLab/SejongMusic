@@ -14,7 +14,7 @@ from sejong_music.yeominrak_processing import OrchestraScoreSeq, ShiftedAlignedS
 from sejong_music.model_zoo import QkvAttnSeq2seq, get_emb_total_size, QkvAttnSeq2seqMore
 from sejong_music.decode import MidiDecoder, OrchestraDecoder
 from sejong_music.inference_utils import prepare_input_for_next_part, get_measure_specific_output, fix_measure_idx, fill_in_source, get_measure_shifted_output, recover_beat, round_number
-
+from sejong_music.inference import Inferencer
 
 def get_argparse():
   parser = argparse.ArgumentParser()
@@ -37,8 +37,8 @@ if __name__ == "__main__":
   inst_codes = ['gmg', 'gyg', 'hg', 'pr', 'dg']
   states = {}
   configs = {}
-  # gmg_config = OmegaConf.load(f'{args.gmg_state_dir}/config.yaml')
-  gmg_config = '/home/danbi/userdata/DANBI/gugakwon/SejongMusic/yamls/orchestration.yaml'
+  gmg_config = OmegaConf.load(f'{args.gmg_state_dir}/config.yaml')
+  # gmg_config = '/home/danbi/userdata/DANBI/gugakwon/SejongMusic/yamls/orchestration.yaml'
 
   for inst_code in inst_codes:
     state_dir = getattr(args, f'{inst_code}_state_dir')
@@ -101,6 +101,8 @@ if __name__ == "__main__":
   gmg_model.is_condition_shifted = True
   gmg_model.load_state_dict(states['gmg'])
   gmg_model.eval()
+  gmg_model = Inferencer(gmg_model, True, True, False, temperature=1.0, top_p=0.8)
+  
 
   decoder = OrchestraDecoder(tokenizer)
   source_decoder = MidiDecoder(era_tokenizer)
@@ -153,10 +155,12 @@ if __name__ == "__main__":
   for tg_idx, inst in enumerate(inst_codes[1:], start=1):
     target_idx = len(inst_codes) - tg_idx - 1
     print(f"target_idx: {target_idx}, inst: {inst}")
-    model = getattr(model_zoo, configs[inst].model_class)(tokenizer, tokenizer, configs[inst].model).to(device)
+    model = getattr(model_zoo, configs[inst].model_class)(tokenizer, configs[inst].model).to(device)
     model.is_condition_shifted = True
     model.load_state_dict(states[inst])
     model.eval()
+    model = Inferencer(model, True, True, False, temperature=2.0, top_p=0.9)
+
 
   
     next_dataset = OrchestraScoreSeq(is_valid=True,

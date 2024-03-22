@@ -8,14 +8,16 @@ def get_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('--xml_path', type=str, required=True)
   parser.add_argument('--output_path', type=str, required=True)
+  parser.add_argument('--jeonggan_quarter_length', type=float, default=1.5)
+  parser.add_argument('--num_jeonggan_per_gak', type=int, default=20)
   return parser.parse_args()
 
 
 if __name__ == "__main__":
   args = get_args()
   score = music21.converter.parse(args.xml_path)
-
-  converter = JGConverter()
+  
+  converter = JGConverter(args.jeonggan_quarter_length, args.num_jeonggan_per_gak)
   converted = converter(score)
 
   with open(args.output_path, 'w') as f:
