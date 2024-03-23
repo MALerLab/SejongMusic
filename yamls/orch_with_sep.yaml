@@ -33,6 +33,7 @@ model:
   dim: 64
   depth: 4
   num_heads: 4
+  drop_out: 0.2
 
 train:
   batch_size: 64
