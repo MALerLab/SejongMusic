@@ -10,8 +10,8 @@ from music21 import stream, environment
 
 from .metric import get_similarity_with_inference, get_correspondence_with_inference
 from .utils import make_dynamic_template
-from .constants import MEAS_LEN_BY_IDX
-from .inference import sequential_inference
+from .constants import MEAS_LEN_BY_IDX, get_dynamic_template_for_orch
+from .inference import sequential_inference, Inferencer
 # from .yeominrak_processing import SamplingScore
 from .evaluation import fill_pitches
 from .decode import MidiDecoder, OrchestraDecoder
@@ -98,7 +98,7 @@ class Trainer:
       if (epoch + 1) % 100 == 0:
         torch.save(self.model.state_dict(), self.save_dir / f'epoch{epoch+1}_model.pt')
       
-      if (epoch + 1) % 30 == 0 and epoch > 250:
+      if (epoch + 1) % 50 == 0 and epoch > 250:
         measure_match, similarity, dynamic_corr = self.make_inference_result()
         if similarity > self.best_pitch_sim:
           self.best_pitch_sim = similarity
@@ -375,22 +375,23 @@ class OrchestraTrainer(Trainer):
   def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None):
     super().__init__(model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log, scheduler)
     self.midi_decoder = OrchestraDecoder(self.valid_loader.dataset.tokenizer)
+    self.inferencer = Inferencer( model, 
+                                  is_condition_shifted=True,  
+                                  is_orch=True,
+                                  is_sep=False,
+                                  temperature=1.0, 
+                                  top_p=0.9)
     if hasattr(self.valid_loader.dataset, 'era_dataset'):
       self.source_decoder = MidiDecoder(self.valid_loader.dataset.era_dataset.tokenizer)
     else:
       self.source_decoder = self.midi_decoder
 
-    self.dynamic_template = {x/2: 'weak' for x in range(0, 90, 3)}
-    self.dynamic_template[0.0] =  'strong'
-    self.dynamic_template[15.0] =  'strong'
-    self.dynamic_template[9.0] =  'middle'
-    self.dynamic_template[21.0] =  'middle'
-
+    self.dynamic_template = get_dynamic_template_for_orch()
     # self.dynamic_templates = [self.dynamic_template for _ in range(8)]
 
     self.dynamic_templates = []
     for part_idx in range(8):
-        frame = 6
+        frame = 4
         whole_measure_len = int(frame * 30)
         dynamic_list = []
         for i in range(whole_measure_len):
@@ -400,7 +401,7 @@ class OrchestraTrainer(Trainer):
 
 
   def make_inference_result(self, write_png=False, loader=None):
-    return 0, 0, 0
+    # return 0, 0, 0
     if loader is None:
       loader = self.valid_loader
     # self.model.to('cpu')
@@ -415,13 +416,9 @@ class OrchestraTrainer(Trainer):
       input_part_idx = sample[0][0]
       target_part_idx = target[0][0]
       # if input_part_idx < 2: continue
-      if self.model.is_condition_shifted:
-        src, output, attn_map = self.model.shifted_inference(sample.to(self.device), target_part_idx)
-      else:
-        src, output, attn_map = self.model.inference(sample.to(self.device), target_part_idx)
-      input_measure_len, output_measure_len = MEAS_LEN_BY_IDX[input_part_idx], 30.0
+      src, output, attn_map = self.inferencer.inference(sample.to(self.device), target_part_idx)
       try:
-        is_match = sum([note[2] for note in src])/input_measure_len == sum([note[2] for note in output])/output_measure_len
+        is_match = sum([note[2] for note in target]) == sum([note[2] for note in output])
       except Exception as e:
         print(f"Error occured in inference result: {e}")
         print(src)
@@ -429,9 +426,9 @@ class OrchestraTrainer(Trainer):
         print([note[2] for note in output])
         is_match = False
       measure_match += [is_match]
-      # if is_match:
-      #   similarity += [get_similarity_with_inference(target, output, self.dynamic_templates)]
-      #   dynamic_corr += [get_correspondence_with_inference(target, output, self.dynamic_templates)]
+      if is_match:
+        similarity += [get_similarity_with_inference(target, output, self.dynamic_templates, beat_sampling_num=4)]
+        dynamic_corr += [get_correspondence_with_inference(target, output, self.dynamic_templates, beat_sampling_num=4)]
       
       src_midi, output_midi = self.source_decoder(src), self.midi_decoder(output)
 
