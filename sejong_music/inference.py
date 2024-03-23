@@ -35,6 +35,10 @@ class Inferencer:
     self.top_p = top_p
   
   
+  @property
+  def device(self):
+    return self.model.parameters().__next__().device
+  
   def get_start_token(self, part_idx):
     num_features = len(self.vocab_size_dict) - 1
     # token_features = [self.tokenizer.tok2idx['index'][part_idx]]
@@ -197,11 +201,17 @@ class Inferencer:
   def _decode_inference_result(self, src, output, other_out):
     if hasattr(self.model, 'enc_converter'):
       return self.model.enc_converter(src[1:-1]), self.converter(output), other_out
-    return self.converter(src[1:-1]), self.converter(output), other_out
+    src_decoded = self.converter(src[1:-1])
+    out_decoded = self.converter(output)
+    if sum(type(y[2])==str for y in out_decoded) > 0:
+      print('Warning: There is a string in the output!')
+      print(out_decoded)
+    return src_decoded, out_decoded, other_out
 
   @torch.inference_mode()
-  def shifted_inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
-    dev = src.device
+  def inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
+    dev = self.device
+    src = src.to(dev)
 
     # Setup for 0th step
     # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
@@ -248,7 +258,7 @@ class Inferencer:
       current_beat, current_measure_idx, measure_changed = self.update_condition_info(current_beat, current_measure_idx, measure_duration, current_dur)
       if 'measure_idx' in self.tokenizer.tok2idx and current_measure_idx > self.tokenizer.vocab['measure_idx'][-1]:
         break
-      if float(current_beat) == 10.0:
+      if float(current_beat) == 10.0 and not self.is_orch:
         print(f"Current Beat ==10.0 detected! cur_beat: {current_beat}, measure_dur: {measure_duration}, cur_measure_idx: {current_measure_idx}, cur_dur: {current_dur}, triplet_sum: {triplet_sum}")
       condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
       

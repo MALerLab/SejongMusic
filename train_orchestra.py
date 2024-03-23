@@ -39,7 +39,7 @@ def main(config: DictConfig):
   original_wd = Path(hydra.utils.get_original_cwd())
   if not save_dir.is_absolute():
     save_dir = original_wd / save_dir
-
+  save_dir.mkdir(parents=True, exist_ok=True)
   dataset_class = getattr(yeominrak_processing, config.dataset_class)
   model_class = getattr(model_zoo, config.model_class)
   train_dataset = dataset_class(is_valid= False, 
@@ -65,6 +65,7 @@ def main(config: DictConfig):
                               is_sep=config.data.is_sep)
     
   collate_fn = getattr(utils, config.collate_fn)
+  loss_fn = getattr(loss, config.loss_fn)
 
   train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size , shuffle=True, collate_fn=collate_fn)
   valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=True)
@@ -75,22 +76,17 @@ def main(config: DictConfig):
     encoder_tokenizer = train_dataset.tokenizer
   else:
     encoder_tokenizer = train_dataset.era_dataset.tokenizer
-  model = model_class(train_dataset.tokenizer, config.model).to(device)
-  if 'offset_fraction' in model.tokenizer.tok2idx:
-    model.tokenizer.tok2idx.pop('offset_fraction')
-  if 'offset' in model.tokenizer.tok2idx:
+    
+  if 'offset_fraction' in train_dataset.tokenizer.tok2idx: # Orchestra does not uses offset_fraction
+    train_dataset.tokenizer.tok2idx.pop('offset_fraction')
+  if 'offset' in train_dataset.tokenizer.tok2idx: # Fill in the missing offset
     for i in range(120):
       if i % 4 == 0:
         continue
-      if i / 4 not in model.tokenizer.tok2idx['offset']:
-        model.tokenizer.tok2idx['offset'][i/4] = model.tokenizer.tok2idx['offset'][(i-2)/4]
-
-  model.is_condition_shifted = isinstance(train_dataset, yeominrak_processing.ShiftedAlignedScore)
-  optimizer = torch.optim.Adam(model.parameters(), lr=config.train.lr)
-  # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.99)
-  scheduler = None
-  save_dir.mkdir(parents=True, exist_ok=True)
-  loss_fn = getattr(loss, config.loss_fn)
+      if i / 4 not in train_dataset.tokenizer.tok2idx['offset']:
+        train_dataset.tokenizer.tok2idx['offset'][i/4] = train_dataset.tokenizer.tok2idx['offset'][(i-2)/4]
+  
+  # --- Save config and tokenizer --- #
   with open(save_dir / 'config.yaml', 'w') as f:
     OmegaConf.save(config, f)
   tokenizer_vocab_path = save_dir / 'tokenizer_vocab.json'
@@ -100,23 +96,35 @@ def main(config: DictConfig):
   else:
     train_dataset.era_dataset.tokenizer.save_to_json(save_dir/'era_tokenizer_vocab.json')
 
-  atrainer = OrchestraTrainer(model=model, optimizer=optimizer, 
-                    loss_fn=loss_fn, train_loader=train_loader, 
-                    valid_loader=valid_loader, device = device, save_log=config.general.make_log, 
-                    save_dir=save_dir, 
-                    scheduler=scheduler)
+  for target_inst_idx in range(4):
+    train_dataset.target_instrument = target_inst_idx
+    val_dataset.target_instrument = target_inst_idx
+    
+    model = model_class(train_dataset.tokenizer, config.model).to(device)
+    model.is_condition_shifted = isinstance(train_dataset, yeominrak_processing.ShiftedAlignedScore)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.train.lr)
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.99)
+    scheduler = None
+    
 
-  atrainer.iteration = total_iteration
-  atrainer.train_by_num_epoch(config.train.num_epoch)
-  atrainer.load_best_model()
+    # --- Training --- #
+    inst_save_dir = save_dir / f'inst_{target_inst_idx}'
+    atrainer = OrchestraTrainer(model=model, 
+                                optimizer=optimizer, 
+                                loss_fn=loss_fn, 
+                                train_loader=train_loader, 
+                                valid_loader=valid_loader, 
+                                device = device, 
+                                save_log=config.general.make_log, 
+                                save_dir=inst_save_dir, 
+                                scheduler=scheduler)
 
-  atrainer.make_inference_result(write_png=True)
-  # atrainer.make_sequential_inference_result(write_png=True)
-  # measure_match, similarity, beat_pitch_match = atrainer.make_inference_result(loader=test_loader)
-  # measure_match_exp.append(measure_match)
-  # similarity_exp.append(similarity)
-  # beat_pitch_match_exp.append(beat_pitch_match)
-  # total_iteration = atrainer.iteration
+    atrainer.iteration = total_iteration
+    atrainer.train_by_num_epoch(config.train.num_epoch)
+    atrainer.load_best_model()
+
+    atrainer.make_inference_result(write_png=True)
+    total_iteration = atrainer.iteration
 
 
 if __name__ == '__main__':

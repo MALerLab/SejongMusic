@@ -679,7 +679,7 @@ class OrchestraScoreGMG(OrchestraScore):
 
 class OrchestraScoreSeq(ShiftedAlignedScore):
   def __init__(self,xml_path='0_edited.musicxml', 
-                valid_measure_num = [i for i in range(93, 104)],
+                valid_measure_num = [i for i in range(88, 96)],
                 slice_measure_num = 2, 
                 is_valid = False, 
                 use_pitch_modification=False, 
@@ -701,9 +701,12 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
     #     offset_index = feature_types.index('offset')
     #     feature_types[offset_index:offset_index+1] = ['daegang_offset', 'jeonggan_offset', 'beat_offset']
     super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate, start_part_idx=1)
-    self.condition_instruments = list(range(target_instrument+1, len(self.parts)))
     if self.is_valid:
       self.slice_info = [list(range(i, i+self.slice_measure_number)) for i in self.valid_measure_num[:-self.slice_measure_number+1]]
+
+  @property
+  def condition_instruments(self):
+    return list(range(self.target_instrument+1, len(self.parts)))
 
   def get_feature(self, part_idx):
     part = self.parts[part_idx]
