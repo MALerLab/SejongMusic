@@ -41,6 +41,7 @@ def main(config: DictConfig):
     save_dir = original_wd / save_dir
   save_dir.mkdir(parents=True, exist_ok=True)
   dataset_class = getattr(yeominrak_processing, config.dataset_class)
+  valid_dataset_class = yeominrak_processing.OrchestraScoreSeq if config.dataset_class=='OrchestraScoreSeqTotal' else dataset_class
   model_class = getattr(model_zoo, config.model_class)
   train_dataset = dataset_class(is_valid= False, 
                                 xml_path=original_wd/'music_score/FullScore_edit5.musicxml',
@@ -53,7 +54,7 @@ def main(config: DictConfig):
                                 target_instrument=config.data.target_instrument,
                                 is_sep = config.data.is_sep
                                 )
-  val_dataset = dataset_class(is_valid= True,
+  val_dataset = valid_dataset_class(is_valid= True,
                               # valid_measure_num = [i for i in range(93, 99)],
                               xml_path=original_wd/'music_score/FullScore_edit5.musicxml', 
                               use_pitch_modification=False, 
@@ -96,15 +97,23 @@ def main(config: DictConfig):
   else:
     train_dataset.era_dataset.tokenizer.save_to_json(save_dir/'era_tokenizer_vocab.json')
 
-  for target_inst_idx in range(4):
-    train_dataset.target_instrument = target_inst_idx
-    val_dataset.target_instrument = target_inst_idx
+  if isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeqTotal):
+    repeat = 1
+    val_dataset.target_instrument = 2
+  elif isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
+    repeat = 4
+  else:
+    raise NotImplementedError
+  for target_inst_idx in range(repeat):
+    if not isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeqTotal) and isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
+      train_dataset.target_instrument = target_inst_idx
+      val_dataset.target_instrument = target_inst_idx
     
     model = model_class(train_dataset.tokenizer, config.model).to(device)
     model.is_condition_shifted = isinstance(train_dataset, yeominrak_processing.ShiftedAlignedScore)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.lr)
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.99)
-    scheduler = None
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.9)
+    # scheduler = None
     
 
     # --- Training --- #

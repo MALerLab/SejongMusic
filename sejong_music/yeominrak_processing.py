@@ -151,9 +151,15 @@ class AlignedScore:
   def modify_pitch(self, target_list):
     ratio = self.pitch_modification_ratio
     modified_list = []
+    min_pitch_idx = 3
+    max_pitch_idx = len(self.vocab['pitch'])
     for note in target_list[1:-1]:
       if random.random() < ratio:
-        pitch = random.choice(self.vocab['pitch'][3:])
+        pitch_idx = self.tokenizer.tok2idx['pitch'][note[1]]
+        min_pitch = max(min_pitch_idx, pitch_idx - 4)
+        max_pitch = min(max_pitch_idx, pitch_idx + 4)
+        pitch_candidates = [i for i in range(min_pitch, max_pitch) if i != pitch_idx]
+        pitch = self.vocab['pitch'][random.choice(pitch_candidates)]
       else:
         pitch = note[1]
       # new_note = [note[0], pitch, note[2], note[3], note[4], [note[5]]]
@@ -784,3 +790,13 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
     src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, idx)          
     return src, tgt, shifted_tgt    
 
+class OrchestraScoreSeqTotal(OrchestraScoreSeq):
+  def __init__(self, xml_path='0_edited.musicxml', valid_measure_num=[i for i in range(88, 96)], slice_measure_num=2, is_valid=False, use_pitch_modification=False, pitch_modification_ratio=0.3, min_meas=3, max_meas=6, feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'], sampling_rate=None, target_instrument=0, is_sep=True) -> None:
+    super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate, target_instrument, is_sep)
+    
+  def __getitem__(self, idx):
+    back_part_idx = random.randint(0, len(self.parts)-2)
+    front_part_idx = [i for i in range(back_part_idx+1, len(self.parts))]
+    front_part_idx = random.sample(front_part_idx, random.randint(1, len(front_part_idx)))
+    src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, idx)          
+    return src, tgt, shifted_tgt    
