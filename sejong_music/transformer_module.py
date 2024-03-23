@@ -34,11 +34,13 @@ class TransDecoder(nn.Module):
     self.layers = x_transformers.Decoder(dim=config.dim, depth=config.depth, num_heads=config.num_heads, cross_attend=True)
     self._make_projection_layer()
     
-  def forward(self, x, enc_out, src_mask):
+  def forward(self, x, enc_out, src_mask, return_logits=False):
     mask = (x != 0)[..., -1]
     embedding = self.embedding(x)
     output = self.layers(embedding, context=enc_out, mask=mask, context_mask=src_mask)
     logit = self.proj(output)
+    if return_logits:
+      return logit
     dec_out = self._apply_softmax(logit)
     return dec_out
   

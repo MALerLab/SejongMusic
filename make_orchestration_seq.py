@@ -155,11 +155,6 @@ if __name__ == "__main__":
   for tg_idx, inst in enumerate(inst_codes[1:], start=1):
     target_idx = len(inst_codes) - tg_idx - 1
     print(f"target_idx: {target_idx}, inst: {inst}")
-    model = getattr(model_zoo, configs[inst].model_class)(tokenizer, configs[inst].model).to(device)
-    model.is_condition_shifted = True
-    model.load_state_dict(states[inst])
-    model.eval()
-    model = Inferencer(model, True, True, False, temperature=2.0, top_p=0.9)
 
 
   
@@ -171,7 +166,16 @@ if __name__ == "__main__":
                                     feature_types=configs[inst].model.features,
                                     sampling_rate=configs[inst].data.sampling_rate,
                                     target_instrument=target_idx)
+    # next_dataset.tokenizer = tokenizer
+    state_dir = getattr(args, f'{inst}_state_dir')
+    tokenizer = Tokenizer(parts=next_dataset.parts, feature_types=configs[inst].model.features, json_fn=f'{state_dir}/tokenizer_vocab.json')
     next_dataset.tokenizer = tokenizer
+    model = getattr(model_zoo, configs[inst].model_class)(tokenizer, configs[inst].model).to(device)
+    model.is_condition_shifted = True
+    model.load_state_dict(states[inst])
+    model.eval()
+    model = Inferencer(model, True, True, False, temperature=2.0, top_p=0.9)
+
     next_dataset.result_pairs = [x for x in next_dataset.result_pairs if x[1] == 1]
     score = stream.Score(id='mainScore')
     outputs = []

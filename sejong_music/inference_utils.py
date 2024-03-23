@@ -12,7 +12,7 @@ def get_measure_shifted_output(output: torch.Tensor):
   output_tokens_from_second_measure = output[i:j].clone()
   output_tokens_from_second_measure[0, 1] = 1
   output_tokens_from_second_measure[0, 2] = 1
-  output_tokens_from_second_measure[:, 5] -= 1
+  output_tokens_from_second_measure[:, -1] -= 1
   return output_tokens_from_second_measure
 
 

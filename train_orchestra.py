@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import DataLoader
 from omegaconf import DictConfig, OmegaConf
 
-from sejong_music import yeominrak_processing, model_zoo
+from sejong_music import yeominrak_processing, model_zoo, loss, utils
 from sejong_music.yeominrak_processing import pack_collate
 from sejong_music.model_zoo import get_emb_total_size
 from sejong_music.loss import nll_loss, focal_loss
@@ -19,14 +19,12 @@ def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
   return f'{current_time_in_str}_{config.general.exp_name}_{config.dataset_class}_{config.model_class}'
 
-@hydra.main(config_path='/home/danbi/userdata/DANBI/gugakwon/SejongMusic/yamls', config_name='orchestration')
+@hydra.main(config_path='yamls/', config_name='orchestration')
 def main(config: DictConfig):
   config = get_emb_total_size(config)
   
   if 'duration' not in config.model.features:
     config.model.features.append('duration')
-  if 'sampling_rate' in config.data and 'samlping_rate' not in config.model:
-    config.model.sampling_rate = config.data.sampling_rate
 
   if config.general.make_log:
     wandb.init(
@@ -64,11 +62,13 @@ def main(config: DictConfig):
                               min_meas=config.data.min_meas,
                               feature_types=copy.copy(config.model.features),
                               sampling_rate=config.data.sampling_rate,
-                              target_instrument=config.data.target_instrument)
+                              target_instrument=config.data.target_instrument,
+                              is_sep=config.data.is_sep)
     
+  collate_fn = getattr(utils, config.collate_fn)
 
-  train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size , shuffle=True, collate_fn=pack_collate)
-  valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=pack_collate, drop_last=True)
+  train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size , shuffle=True, collate_fn=collate_fn)
+  valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=True)
 
   device = 'cuda'
   total_iteration = 0
@@ -76,7 +76,7 @@ def main(config: DictConfig):
     encoder_tokenizer = train_dataset.tokenizer
   else:
     encoder_tokenizer = train_dataset.era_dataset.tokenizer
-  model = model_class(encoder_tokenizer, train_dataset.tokenizer, config.model).to(device)
+  model = model_class(train_dataset.tokenizer, config.model).to(device)
   if 'offset_fraction' in model.tokenizer.tok2idx:
     model.tokenizer.tok2idx.pop('offset_fraction')
   if 'offset' in model.tokenizer.tok2idx:
@@ -91,8 +91,7 @@ def main(config: DictConfig):
   # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.99)
   scheduler = None
   save_dir.mkdir(parents=True, exist_ok=True)
-  loss_fn = nll_loss
-  
+  loss_fn = getattr(loss, config.loss_fn)
   with open(save_dir / 'config.yaml', 'w') as f:
     OmegaConf.save(config, f)
   tokenizer_vocab_path = save_dir / 'tokenizer_vocab.json'
@@ -121,8 +120,5 @@ def main(config: DictConfig):
   # total_iteration = atrainer.iteration
 
 
-
 if __name__ == '__main__':
-  # config = OmegaConf.load('./yamls/baseline.yaml')
   main()
-  
