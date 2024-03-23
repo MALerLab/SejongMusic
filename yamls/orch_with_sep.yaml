@@ -33,12 +33,12 @@ model:
   dim: 64
   depth: 4
   num_heads: 4
-  drop_out: 0.2
+  dropout: 0.2
 
 train:
   batch_size: 64
   # total_iters: 25000
   num_epoch: 600
   seed: 42
-  num_workers: 8
+  num_workers: 4
   lr: 1e-3

@@ -12,7 +12,10 @@ class TransEncoder(nn.Module):
     self.vocab_size = [x for x in vocab_size_dict.values()]
     self.vocab_size_dict = vocab_size_dict
     self._make_embedding_layer()
-    self.layers = x_transformers.Encoder(dim=self.param.dim ,depth=self.param.depth, num_heads=self.param.num_heads)
+    self.layers = x_transformers.Encoder(dim=self.param.dim,
+                                         depth=self.param.depth, 
+                                         num_heads=self.param.num_heads,
+                                         dropout=self.param.dropout)
     
   def _make_embedding_layer(self):
     self.embedding = SumEmbedding(self.vocab_size_dict, self.param.dim)
@@ -31,7 +34,11 @@ class TransDecoder(nn.Module):
     self.vocab_size = [x for x in vocab_size_dict.values()]
     self.param = config
     self.embedding = SumEmbedding(vocab_size_dict, config.dim)
-    self.layers = x_transformers.Decoder(dim=config.dim, depth=config.depth, num_heads=config.num_heads, cross_attend=True)
+    self.layers = x_transformers.Decoder(dim=config.dim, 
+                                         depth=config.depth, 
+                                         num_heads=config.num_heads, 
+                                         dropout=config.dropout,
+                                         cross_attend=True)
     self._make_projection_layer()
     
   def forward(self, x, enc_out, src_mask, return_logits=False):
