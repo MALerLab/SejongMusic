@@ -25,7 +25,7 @@ os.putenv("XDG_RUNTIME_DIR", environment.Environment().getRootTempDir())
 
 
 class Trainer:
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None):
+  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None, clip_grad_norm=1.0):
   # def __init__(self, **kwargs):
   #   for key, value in kwargs.items():
   #     setattr(self, key, value)  
@@ -36,6 +36,7 @@ class Trainer:
     self.train_loader = train_loader
     self.valid_loader = valid_loader
     self.midi_decoder = MidiDecoder(self.valid_loader.dataset.tokenizer)
+    self.clip_grad_norm = clip_grad_norm
 
     self.model.to(device)
     
@@ -233,6 +234,7 @@ class Trainer:
     loss, _, loss_dict, attn_weight = self.get_loss_from_single_batch(batch)
     
     loss.backward()
+    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
     self.optimizer.step()
     self.optimizer.zero_grad()
     if self.scheduler is not None:
@@ -372,8 +374,8 @@ class CNNTrainer(Trainer):
 
 
 class OrchestraTrainer(Trainer):
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None):
-    super().__init__(model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log, scheduler)
+  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None,clip_grad_norm=1.0):
+    super().__init__(model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log, scheduler,clip_grad_norm)
     self.midi_decoder = OrchestraDecoder(self.valid_loader.dataset.tokenizer)
     self.inferencer = Inferencer( model, 
                                   is_condition_shifted=True,  
@@ -412,9 +414,9 @@ class OrchestraTrainer(Trainer):
     dynamic_corr = [0]
     for idx in selected_idx_list:
       sample, _, target = loader.dataset[idx]
-      target = self.model.converter(target[:-1])
-      input_part_idx = sample[0][0]
       target_part_idx = target[0][0]
+      target = self.model.converter(target[:-1])
+      input_part_idx = sample[1][0]
       # if input_part_idx < 2: continue
       src, output, attn_map = self.inferencer.inference(sample.to(self.device), target_part_idx)
       try:
