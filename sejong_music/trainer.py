@@ -431,9 +431,11 @@ class OrchestraTrainer(Trainer):
         dynamic_corr += [get_correspondence_with_inference(target, output, self.dynamic_templates, beat_sampling_num=4)]
       
       src_midi, output_midi = self.source_decoder(src), self.midi_decoder(output)
+      tgt_midi = self.midi_decoder(target)
 
       merged_midi = stream.Score()
-      merged_midi.insert(0, src_midi)
+      # merged_midi.insert(0, src_midi)
+      merged_midi.insert(0, tgt_midi)
       merged_midi.insert(0, output_midi)
       
       

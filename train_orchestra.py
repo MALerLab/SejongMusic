@@ -23,8 +23,7 @@ def make_experiment_name_with_date(config):
 def main(config: DictConfig):
   config = get_emb_total_size(config)
   
-  if 'duration' not in config.model.features:
-    config.model.features.append('duration')
+  assert 'duration' in config.model.features, 'Duration should be included in the feature list.'
 
   if config.general.make_log:
     wandb.init(
@@ -109,9 +108,9 @@ def main(config: DictConfig):
 
   atrainer.iteration = total_iteration
   atrainer.train_by_num_epoch(config.train.num_epoch)
-  # atrainer.load_best_model()
+  atrainer.load_best_model()
 
-  # atrainer.make_inference_result(write_png=True)
+  atrainer.make_inference_result(write_png=True)
   # atrainer.make_sequential_inference_result(write_png=True)
   # measure_match, similarity, beat_pitch_match = atrainer.make_inference_result(loader=test_loader)
   # measure_match_exp.append(measure_match)
