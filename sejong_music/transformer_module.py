@@ -16,6 +16,8 @@ class TransEncoder(nn.Module):
                                          depth=self.param.depth, 
                                          num_heads=self.param.num_heads,
                                          dropout=self.param.dropout)
+    add_dropout_after_attn(self.layers, self.param.dropout)
+    add_dropout_after_ff(self.layers, self.param.dropout)
     
   def _make_embedding_layer(self):
     self.embedding = SumEmbedding(self.vocab_size_dict, self.param.dim)
@@ -40,7 +42,9 @@ class TransDecoder(nn.Module):
                                          dropout=config.dropout,
                                          cross_attend=True)
     self._make_projection_layer()
-    
+    add_dropout_after_attn(self.layers, self.param.dropout)
+    add_dropout_after_ff(self.layers, self.param.dropout)
+
   def forward(self, x, enc_out, src_mask, return_logits=False):
     mask = (x != 0)[..., -1]
     embedding = self.embedding(x)
@@ -69,3 +73,21 @@ class TransDecoder(nn.Module):
     dur_token = prob[0, :, self.vocab_size[1]:].multinomial(num_samples=1)
     # dur_token = torch.argmax(prob.data[:, model.vocab_size[0]:], dim=-1)
     return torch.cat([pitch_token, dur_token], dim=-1)
+  
+  
+  
+  
+def add_dropout_after_attn(x_module:x_transformers.Encoder, dropout):
+  for layer in x_module.layers:
+    if 'Attention' in str(type(layer[1])): 
+      if isinstance(layer[1].to_out, nn.Sequential): # if GLU
+        layer[1].to_out.append(nn.Dropout(dropout))
+      elif isinstance(layer[1].to_out, nn.Linear): # if simple linear
+        layer[1].to_out = nn.Sequential(layer[1].to_out, nn.Dropout(dropout))
+      else:
+        raise ValueError('to_out should be either nn.Sequential or nn.Linear')
+
+def add_dropout_after_ff(x_module:x_transformers.Encoder, dropout):
+  for layer in x_module.layers:
+    if 'FeedForward' in str(type(layer[1])):
+      layer[1].ff.append(nn.Dropout(dropout))
