@@ -208,6 +208,50 @@ class Part:
         
         return output
 
+
+class OffsetHandler:
+  def __init__(self, beat_type) -> None:
+    assert beat_type in ['orchestration', 'era']
+    self.type = beat_type
+    
+    if beat_type == 'orchestration':
+      self.ratio = 1.5
+      self.daegang_offset = [0.0, 6.0, 10.0, 14.0]
+      self.jeonggan_offset = [i*self.ratio for i in range(0, 6)]
+      self.injeonggan_offset = [i/6*self.ratio for i in range(0, 6)]
+    else:
+      self.ratio = 0.5
+      self.daegang_offset = [0.0, 2.5, 4.0, 5.5]
+      self.jeonggan_offset = [i*self.ratio for i in range(0, 6)]
+      self.injeonggan_offset = [i/6*self.ratio for i in range(0, 6)]
+  
+  def convert_to_orch_type(self, value):
+    daegang_idx = 0
+    for i, offset in enumerate(self.daegang_offset):
+      if offset > value:
+        daegang_idx = i
+        break
+    jeonggan_value = value - self.daegang_offset[daegang_idx]
+    jeonggan_idx = 0
+    for i, offset in enumerate(self.jeonggan_offset):
+      if jeonggan_value >= offset:
+        jeonggan_idx = i
+    injeonggan_value = jeonggan_value - self.jeonggan_offset[jeonggan_idx]
+    injeonggan_idx = 0
+    for i, offset in enumerate(self.injeonggan_offset):
+      if injeonggan_value >= offset:
+        injeonggan_idx = i
+    return [daegang_idx, jeonggan_idx, injeonggan_idx]
+  
+  def convert_to_era_type(self, value):
+    beat_value = value // 1
+    ineonggan_value = value % 1
+    return [beat_value, ineonggan_value]
+  
+  def __call__(self, value):
+    return
+    
+
 def make_offset_set(value, beat_type='orchestration'): # beat_type = ['orchestration', 'era', 'basic']
   daegang_offset = [0.0, 6.0, 10.0, 14.0]
   if beat_type == 'orchestration' :
@@ -240,7 +284,6 @@ def make_offset_set(value, beat_type='orchestration'): # beat_type = ['orchestra
       injeonggan_idx = i
   new_offset.append(injeonggan_idx)
   return new_offset
-
 
 def as_fraction(dct):
     if "numerator" in dct and "denominator" in dct:
@@ -285,14 +328,9 @@ def pad_collate_transformer(raw_batch):
 
 # ===================sampling-utils=================== #
 
-def make_dynamic_template(offset_list=MEAS_LEN_BY_IDX, beat_sampling_num=6, is_orche=True): 
+def make_dynamic_template(offset_list=MEAS_LEN_BY_IDX, beat_sampling_num=6): 
   whole_dynamic_template = []
-  if is_orche:
-    dynamic_mapping = {0.0: 'strong', 5.0: 'strong', 3.0: 'middle', 7.0: 'middle',\
-              1.0: 'weak', 2.0: 'weak', 4.0: 'weak', 6.0: 'weak', 8.0: 'weak', 9.0: 'weak'}
-    dynamic = dynamic_mapping.get(float(i) / frame, 'none')
-    return dynamic
-    
+
   for part_idx in range(8):
       frame = beat_sampling_num
       # if part_idx == 0:
