@@ -30,6 +30,7 @@ def get_argparse():
   # parser.add_argument('--state_alt_path', type=str, default='outputs/2023-12-20/14-46-58/best_loss_model.pt')
   parser.add_argument('--config_path', type=str, default='yamls/baseline.yaml')
   parser.add_argument('--output_dir', type=str, default='gen_results/')
+  parser.add_argument('--use_total_model', action='store_true')
   return parser
 
 if __name__ == "__main__":
@@ -47,10 +48,13 @@ if __name__ == "__main__":
       state_dir = getattr(args, f'{inst_code}_state_dir')
       configs[inst_code] = OmegaConf.load(f'{state_dir}/config.yaml')
     else:
-      state_dir = args.inst_state_dir + f'/inst_{inst_codes_to_idx[inst_code]}'
+      if args.use_total_model:
+        state_dir = args.inst_state_dir + '/inst_0'
+      else:
+        state_dir = args.inst_state_dir + f'/inst_{inst_codes_to_idx[inst_code]}'
       configs[inst_code] = OmegaConf.load(f'{args.inst_state_dir}/config.yaml')
 
-    states[inst_code] = torch.load(f'{state_dir}/epoch500_model.pt')
+    states[inst_code] = torch.load(f'{state_dir}/epoch600_model.pt')
   tokenizer = Tokenizer(parts=None, feature_types=None, json_fn=f'{args.gmg_state_dir}/tokenizer_vocab.json')
   era_tokenizer = Tokenizer(parts=None, feature_types=None, json_fn=f'{args.gmg_state_dir}/era_tokenizer_vocab.json')
   
