@@ -10,7 +10,7 @@ from sejong_music.yeominrak_processing import OrchestraScoreSeq, pack_collate
 from sejong_music.model_zoo import Seq2seq, QkvAttnSeq2seqOrch, get_emb_total_size, TransSeq2seq
 from sejong_music.utils import convert_note_to_sampling, convert_onset_to_sustain_token, make_offset_set
 from sejong_music.sampling_utils import nucleus
-from sejong_music.constants import get_dynamic_template_for_orch
+from sejong_music.constants import get_dynamic_template_for_orch, get_dynamic
 
 
 class Inferencer:
@@ -115,6 +115,13 @@ class Inferencer:
       jeonggan_offset = self.tokenizer.tok2idx['jeonggan_offset'][jeonggan]
       beat_offset = self.tokenizer.tok2idx['beat_offset'][beat]
       condition_features += [daegang_offset, jeonggan_offset, beat_offset]
+    
+    elif 'jeonggan_offset' in self.tokenizer.tok2idx:
+      jeonggan_value = current_beat // 1
+      jeonggan_offset = self.tokenizer.tok2idx['jeonggan_offset'][jeonggan_value]
+      beat_offset_value = Fraction(current_beat % 1).limit_denominator(3)
+      beat_offset = self.tokenizer.tok2idx['beat_offset'][beat_offset_value]
+      condition_features += [jeonggan_offset, beat_offset]
       
     if 'dynamic' in self.tokenizer.tok2idx:
       if self.is_orch:
@@ -122,7 +129,7 @@ class Inferencer:
         dynamic_idx = self.tokenizer.tok2idx['dynamic'][dynamic]
         condition_features.append(dynamic_idx)
       else:
-        dynamic = self.get_dynamic(current_beat, part_idx)
+        dynamic = get_dynamic(current_beat, part_idx)
         dynamic_idx = self.tokenizer.tok2idx['dynamic'][dynamic]
         condition_features.append(dynamic_idx)
         
