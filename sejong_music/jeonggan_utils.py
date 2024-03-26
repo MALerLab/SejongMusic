@@ -1,7 +1,7 @@
 from typing import List
 import music21
 
-from .yeominrak_processing import apply_tie, Gnote
+from .utils import apply_tie, Gnote
 
 class JGConverter:
   def __init__(self, jeonggan_quarter_length=1.5, num_jeonggan_per_gak=20):
@@ -73,6 +73,8 @@ class JGConverter:
             text_jgs[i] += f'{note[0]}:12'
           elif note[1] == self.jql / 6:
             text_jgs[i] += f'{note[0]}:1'
+          elif note[1] == self.jql * 5 / 6:
+            text_jgs[i] += f'{note[0]}:2 -:5 -:7'
           else:
             print(f"None of the note[1] is matched while note[2]==0: {note}")
         elif note[2] == self.jql / 6:

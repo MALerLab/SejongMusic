@@ -3,8 +3,8 @@ import json
 from typing import List, Set, Dict, Tuple, Union
 
 from fractions import Fraction
-from collections import defaultdict, Counter
-from .utils import SimpleNote, Part, Gnote, make_offset_set, as_fraction, FractionEncoder, pack_collate, pad_collate, round_number
+from collections import defaultdict
+from .utils import  as_fraction, FractionEncoder
 
 
 
@@ -25,6 +25,9 @@ class Tokenizer:
             vocab_list['daegang_offset'] = ['pad', 'start', 'end'] + [i for i in range(0, 4)]
             vocab_list['jeonggan_offset'] = ['pad', 'start', 'end'] + [i for i in range(0, 6)]
             vocab_list['beat_offset'] = ['pad', 'start', 'end'] + [i for i in range(0, 6)]
+        elif 'jeonggan_offset' in feature_types: # In case using jeonggan offset without daegang offset
+            vocab_list['jeonggan_offset'] = ['pad', 'start', 'end'] + [i for i in range(0, 10)]
+            vocab_list['beat_offset'] = ['pad', 'start', 'end'] + [Fraction(0, 1), Fraction(1, 3),  Fraction(1,2), Fraction(2, 3)]
         if 'dynamic' in feature_types:
             vocab_list['dynamic'] = ['pad', 'start', 'end'] + ['strong', 'middle', 'weak', 'none']
         if 'measure_idx' in feature_types:
