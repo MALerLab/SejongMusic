@@ -14,6 +14,7 @@ from sejong_music.yeominrak_processing import pack_collate
 from sejong_music.model_zoo import get_emb_total_size
 from sejong_music.loss import nll_loss, focal_loss
 from sejong_music.trainer import OrchestraTrainer
+from sejong_music.train_utils import CosineLRScheduler
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
@@ -99,20 +100,28 @@ def main(config: DictConfig):
 
   if isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeqTotal):
     repeat = 1
-    val_dataset.target_instrument = 2
+    val_dataset.target_instrument = 1
   elif isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
     repeat = 4
   else:
     raise NotImplementedError
+  
+  
   for target_inst_idx in range(repeat):
     if not isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeqTotal) and isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
       train_dataset.target_instrument = target_inst_idx
       val_dataset.target_instrument = target_inst_idx
     
     model = model_class(train_dataset.tokenizer, config.model).to(device)
+    num_model_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f'Number of model parameters: {num_model_parameters}')
+    if config.general.make_log: 
+      wandb.run.summary['num_model_parameters'] = num_model_parameters
+    
     model.is_condition_shifted = isinstance(train_dataset, yeominrak_processing.ShiftedAlignedScore)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.9)
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.9)
+    scheduler = CosineLRScheduler(optimizer, total_steps=config.train.num_epoch * len(train_loader), warmup_steps=500, lr_min_ratio=0.0001, cycle_length=1.0)
     # scheduler = None
     
 
