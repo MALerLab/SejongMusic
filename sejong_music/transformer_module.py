@@ -15,7 +15,9 @@ class TransEncoder(nn.Module):
     self.layers = x_transformers.Encoder(dim=self.param.dim,
                                          depth=self.param.depth, 
                                          num_heads=self.param.num_heads,
-                                         dropout=self.param.dropout)
+                                         attn_dropout=config.dropout,
+                                         ff_dropout = config.dropout
+    )
     add_dropout_after_attn(self.layers, self.param.dropout)
     add_dropout_after_ff(self.layers, self.param.dropout)
     
@@ -39,7 +41,9 @@ class TransDecoder(nn.Module):
     self.layers = x_transformers.Decoder(dim=config.dim, 
                                          depth=config.depth, 
                                          num_heads=config.num_heads, 
-                                         dropout=config.dropout,
+                                         attn_dropout=config.dropout,
+                                         ff_dropout = config.dropout,
+                                         cross_attn_dropout = config.dropout,
                                          cross_attend=True)
     self._make_projection_layer()
     add_dropout_after_attn(self.layers, self.param.dropout)
