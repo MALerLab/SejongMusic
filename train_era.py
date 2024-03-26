@@ -15,7 +15,7 @@ from sejong_music.model_zoo import get_emb_total_size
 from sejong_music import utils
 from sejong_music import loss
 from sejong_music.loss import nll_loss, focal_loss, nll_loss_transformer
-from sejong_music.trainer import Trainer, RollTrainer
+from sejong_music.trainer import Trainer
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
@@ -113,7 +113,10 @@ def main(config: DictConfig):
     torch.cuda.manual_seed(seed_idx)
 
     model = model_class(tokenizer, config.model).to(device)
-
+    num_model_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f'Number of model parameters: {num_model_parameters}')
+    if config.general.make_log: 
+      wandb.run.summary['num_model_parameters'] = num_model_parameters
 
     model.is_condition_shifted = (config.dataset_class == "ShiftedAlignedScore")
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.lr)
