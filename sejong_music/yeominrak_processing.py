@@ -4,6 +4,7 @@ import torch
 
 from pathlib import Path
 from typing import List, Set, Dict, Tuple, Union
+from fractions import Fraction
 
 from music21 import converter, stream, note as m21_note 
 
@@ -76,6 +77,10 @@ class AlignedScore:
       features.append(note.duration)
       if 'offset' in self.tokenizer.key_types:
           features.append(note.measure_offset)
+      if 'jeonggan_offset' in self.tokenizer.key_types:
+          features.append(note.measure_offset//1)
+      if 'beat_offset' in self.tokenizer.key_types:
+          features.append(Fraction(note.measure_offset%1).limit_denominator(3))
       if 'dynamic' in self.tokenizer.key_types:
           features.append(note.dynamic)
       if 'measure_idx' in self.tokenizer.key_types:
@@ -151,9 +156,15 @@ class AlignedScore:
   def modify_pitch(self, target_list):
     ratio = self.pitch_modification_ratio
     modified_list = []
+    min_pitch_idx = 3
+    max_pitch_idx = len(self.vocab['pitch'])
     for note in target_list[1:-1]:
       if random.random() < ratio:
-        pitch = random.choice(self.vocab['pitch'][3:])
+        pitch_idx = self.tokenizer.tok2idx['pitch'][note[1]]
+        min_pitch = max(min_pitch_idx, pitch_idx - 4)
+        max_pitch = min(max_pitch_idx, pitch_idx + 4)
+        pitch_candidates = [i for i in range(min_pitch, max_pitch) if i != pitch_idx]
+        pitch = self.vocab['pitch'][random.choice(pitch_candidates)]
       else:
         pitch = note[1]
       # new_note = [note[0], pitch, note[2], note[3], note[4], [note[5]]]
@@ -270,6 +281,8 @@ class ShiftedAlignedScore(AlignedScore):
             last_condition.append(0)
         if 'daegang_offset' in self.tokenizer.key_types:
             last_condition += [0, 0, 0]
+        elif 'jeonggan_offset' in self.tokenizer.key_types:
+            last_condition += [0, Fraction(0,1)]
         if 'dynamic' in self.tokenizer.key_types:
             last_condition.append('strong')
         if 'measure_idx' in self.tokenizer.key_types:
@@ -283,8 +296,8 @@ class ShiftedAlignedScore(AlignedScore):
         return combined
     
     def get_processed_feature(self, front_part_idx, back_part_idx, idx):
-        source_start_token = [front_part_idx, 'start', 'start', 'start', 'start', 'start']
-        source_end_token = [front_part_idx, 'end', 'end', 'end', 'end', 'end']
+        source_start_token = [front_part_idx] + ['start'] * (len(self.feature_types) - 1)
+        source_end_token = [front_part_idx]+ ['end'] * (len(self.feature_types) - 1) 
         # target_start_token = [back_part_idx, 'start', 'start', 0, 'strong']
         # target_end_token = [back_part_idx, 'end', 'end', 0, 'strong']
         if self.is_valid:
@@ -325,202 +338,6 @@ class ShiftedAlignedScore(AlignedScore):
         
         return torch.LongTensor(source), torch.LongTensor(target), torch.LongTensor(shifted_target)        
         
-
-class TestScore(AlignedScore):
-    def __init__(self, xml_path='0_edited.musicxml', 
-                 valid_measure_num=[i for i in range(93, 104)], 
-                 slice_measure_num=2, 
-                 is_valid=False, 
-                 use_pitch_modification=False, 
-                 pitch_modification_ratio=0, 
-                 min_meas=3, 
-                 max_meas=6, 
-                 transpose=0, 
-                 feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
-                 sampling_rate=None) -> None:
-        # DYNAMIC_MAPPING[0] = {0.0: 'strong', 1.5: 'strong', 3.0: 'middle'}
-        super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types)
-        self.transpose_value = transpose
-        self.transpose()
-        self.result_pairs = self.result_pairs[:len(self.slice_info)]
-
-    # def fix_part_zero_duration(self):
-    #     return
-    def fix_part_by_rule(self):
-        flattened_notes = [SimpleNote(note) for measure in self.parts[0].measures for note in measure]
-                  
-        measure_shifted_notes = []
-        for note in flattened_notes:
-          new_offset = (note.measure_offset - 1.5 )
-          new_note = None
-          if note.pitch == 44:
-            note.pitch = 45 # 44 is error
-          if note.duration > 4:
-            break
-          if new_offset < 0:
-            new_offset += 4
-            note.measure_number -= 1
-            note.end_measure_number -= 1
-            if note.measure_number <= 0:
-              new_note = copy.copy(note)
-              new_note.measure_offset = 0
-              new_note.duration = 4 - note.duration
-              measure_shifted_notes.append(new_note)
-              new_note = None
-          note.measure_offset = new_offset
-          if note.measure_offset + note.duration > 4:
-            # print("note duration is too long", note.measure_offset, note.duration)
-            extended_duration = note.measure_offset + note.duration - 4
-            note.duration -= extended_duration
-            new_note = copy.copy(note)
-            new_note.measure_offset = 0
-            new_note.measure_number += 1
-            new_note.end_measure_number += 1
-            new_note.duration = extended_duration
-          measure_shifted_notes.append(note)
-          if new_note:
-            measure_shifted_notes.append(new_note)
-        new_note = copy.copy(note)
-        new_note.measure_offset += note.duration
-        new_note.duration = 1.5
-        measure_shifted_notes.append(new_note)
-
-        measure_shifted_notes.sort(key=lambda x: (x.measure_number, x.measure_offset))
-
-        # make measure list
-        note_by_measure = []
-        temp_measure = []
-        prev_measure_number = 0
-        for note in measure_shifted_notes:
-          if note.measure_number != prev_measure_number:
-            note_by_measure.append(temp_measure)
-            temp_measure = []
-            prev_measure_number = note.measure_number
-          temp_measure.append(note)
-        note_by_measure.append(temp_measure)
-
-        self.parts[0].measures = note_by_measure
-        self.measure_features = [self.get_feature(i) for i in range(len(self.parts))]
-
-        part_zero = self.measure_features[0].copy()
-        for measure in part_zero:
-          for note in measure:
-            note[2] *= 2
-            note[3] *= 2
-        self.measure_features[0] = part_zero
-        self.offset_list[0] *= 2
-
-
-    def transpose(self):
-      for idx in range(len(self.parts)):
-        part_zero = self.measure_features[idx].copy()
-        for measure in part_zero:
-          for note in measure:
-            note[1] += self.transpose_value
-        self.measure_features[idx] = part_zero
-
-    def get_processed_feature(self, front_part_idx, back_part_idx, idx):
-      source_start_token = [front_part_idx, 'start', 'start', 'start', 'start', 'start']
-      source_end_token = [front_part_idx, 'end', 'end', 'end', 'end', 'end']
-      if self.is_valid:
-          measure_list = idx
-      else:    
-          measure_list = self.slice_info[idx]
-      original_source_list = [item for idx in measure_list for item in self.measure_features[front_part_idx][idx]]
-      if 'measure_idx' in self.tokenizer.key_types:
-        m_idx_pos = self.tokenizer.key2idx['measure_idx']
-        source_first_measure_idx = original_source_list[0][m_idx_pos]
-
-        original_source_list = [note[:m_idx_pos] + [note[m_idx_pos]-source_first_measure_idx] + note[m_idx_pos+1:] for note in original_source_list]
-
-      source_list = [source_start_token] + original_source_list + [source_end_token]
-      source = [self.tokenizer(note_feature) for note_feature in source_list]
-      
-      return torch.LongTensor(source)
-        
-    def __getitem__(self, idx):
-
-      front_part_idx, back_part_idx, measure_idx = self.result_pairs[idx]
-      src = self.get_processed_feature(front_part_idx, back_part_idx, measure_idx)
-      
-      return src
-
-class TestScoreCPH(TestScore):
-  def __init__(self, xml_path='0_edited.musicxml', valid_measure_num=..., slice_measure_num=2, is_valid=False, use_pitch_modification=False, pitch_modification_ratio=0, min_meas=3, max_meas=6, transpose=0, feature_types=..., sampling_rate=None) -> None:
-    super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, transpose, feature_types, sampling_rate)
-
-
-  def fix_part_by_rule(self):
-    flattened_notes = [SimpleNote(note) for measure in self.parts[0].measures for note in measure]
-              
-    measure_shifted_notes = []
-    for note in flattened_notes:
-      new_offset = (note.measure_offset - 2.5 )
-      new_note = None
-
-      ### pitch modification
-      if note.pitch == 51:
-        note.pitch = 52 # 51 is error
-      if note.pitch == 39:
-        note.pitch = 40
-      if note.pitch == 56:
-        note.pitch = 57
-      if note.pitch == 57:
-        note.pitch = 45
-
-      if new_offset < 0:
-        new_offset += 4
-        note.measure_number -= 1
-        note.end_measure_number -= 1
-      note.measure_offset = new_offset
-      if note.measure_offset + note.duration > 4:
-        # print("note duration is too long", note.measure_offset, note.duration)
-        extended_duration = note.measure_offset + note.duration - 4
-        note.duration -= extended_duration
-        new_note = copy.copy(note)
-        new_note.measure_offset = 0
-        new_note.measure_number += 1
-        new_note.end_measure_number += 1
-        new_note.duration = extended_duration
-      measure_shifted_notes.append(note)
-      if new_note:
-        measure_shifted_notes.append(new_note)
-    new_note = copy.copy(note)
-    new_note.measure_offset += note.duration
-    new_note.duration = 2.5
-    measure_shifted_notes.append(new_note)
-
-    beginning_dummy_note = copy.copy(measure_shifted_notes[0])
-    beginning_dummy_note.measure_offset = 0
-    beginning_dummy_note.duration = 1.5
-    measure_shifted_notes.append(beginning_dummy_note)
-
-    measure_shifted_notes.sort(key=lambda x: (x.measure_number, x.measure_offset))
-
-    # make measure list
-    note_by_measure = []
-    temp_measure = []
-    prev_measure_number = 0
-    for note in measure_shifted_notes:
-      if note.measure_number != prev_measure_number:
-        note_by_measure.append(temp_measure)
-        temp_measure = []
-        prev_measure_number = note.measure_number
-      temp_measure.append(note)
-    note_by_measure.append(temp_measure)
-
-    self.parts[0].measures = note_by_measure
-    self.measure_features = [self.get_feature(i) for i in range(len(self.parts))]
-
-    part_zero = self.measure_features[0].copy()
-    for measure in part_zero:
-      for note in measure:
-        note[2] *= 2
-        note[3] *= 2
-    self.measure_features[0] = part_zero
-    self.offset_list[0] *= 2
-
-    
 
 
 class OrchestraScore(ShiftedAlignedScore):
@@ -570,7 +387,7 @@ class OrchestraScore(ShiftedAlignedScore):
     features.append(note.duration)
     if 'offset' in self.tokenizer.key_types:
         features.append(note.measure_offset)
-    if self.is_sep:
+    if 'daegang_offset' in self.tokenizer.key_types:
         offsets = make_offset_set(note.measure_offset)  # [daegang, jeonggan, beat]
         features += offsets
     if 'dynamic' in self.tokenizer.key_types:
@@ -679,7 +496,7 @@ class OrchestraScoreGMG(OrchestraScore):
 
 class OrchestraScoreSeq(ShiftedAlignedScore):
   def __init__(self,xml_path='0_edited.musicxml', 
-                valid_measure_num = [i for i in range(93, 104)],
+                valid_measure_num = [i for i in range(88, 96)],
                 slice_measure_num = 2, 
                 is_valid = False, 
                 use_pitch_modification=False, 
@@ -701,9 +518,20 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
     #     offset_index = feature_types.index('offset')
     #     feature_types[offset_index:offset_index+1] = ['daegang_offset', 'jeonggan_offset', 'beat_offset']
     super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate, start_part_idx=1)
-    self.condition_instruments = list(range(target_instrument+1, len(self.parts)))
     if self.is_valid:
       self.slice_info = [list(range(i, i+self.slice_measure_number)) for i in self.valid_measure_num[:-self.slice_measure_number+1]]
+
+  # @property
+  # def condition_instruments(self):
+  #   conditions = {0: [1, 2, 3, 4],
+  #             2: [1, 3, 4],
+  #             3: [1, 4],
+  #             4: [1]}
+  #   return conditions[self.target_instrument]
+  
+  @property
+  def condition_instruments(self):
+    return list(range(self.target_instrument+1, len(self.parts)))
 
   def get_feature(self, part_idx):
     part = self.parts[part_idx]
@@ -781,3 +609,21 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
     src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, idx)          
     return src, tgt, shifted_tgt    
 
+class OrchestraScoreSeqTotal(OrchestraScoreSeq):
+  def __init__(self, xml_path='0_edited.musicxml', valid_measure_num=[i for i in range(88, 96)], slice_measure_num=2, is_valid=False, use_pitch_modification=False, pitch_modification_ratio=0.3, min_meas=3, max_meas=6, feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'], sampling_rate=None, target_instrument=0, is_sep=True) -> None:
+    super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate, target_instrument, is_sep)
+  
+  # @property
+  # def condition_instruments(self):
+  #   conditions = {0: [1, 2, 3, 4],
+  #             2: [1, 3, 4],
+  #             3: [1, 4],
+  #             4: [1]}
+  #   return conditions[self.target_instrument]
+  
+  def __getitem__(self, idx):
+    back_part_idx = random.randint(0, len(self.parts)-2)
+    front_part_idx = [i for i in range(back_part_idx+1, len(self.parts))]
+    front_part_idx = random.sample(front_part_idx, random.randint(1, len(front_part_idx)))
+    src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, idx)          
+    return src, tgt, shifted_tgt    

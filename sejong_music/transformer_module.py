@@ -12,7 +12,14 @@ class TransEncoder(nn.Module):
     self.vocab_size = [x for x in vocab_size_dict.values()]
     self.vocab_size_dict = vocab_size_dict
     self._make_embedding_layer()
-    self.layers = x_transformers.Encoder(dim=self.param.dim ,depth=self.param.depth, num_heads=self.param.num_heads)
+    self.layers = x_transformers.Encoder(dim=self.param.dim,
+                                         depth=self.param.depth, 
+                                         num_heads=self.param.num_heads,
+                                         attn_dropout=config.dropout,
+                                         ff_dropout = config.dropout
+    )
+    add_dropout_after_attn(self.layers, self.param.dropout)
+    add_dropout_after_ff(self.layers, self.param.dropout)
     
   def _make_embedding_layer(self):
     self.embedding = SumEmbedding(self.vocab_size_dict, self.param.dim)
@@ -31,14 +38,24 @@ class TransDecoder(nn.Module):
     self.vocab_size = [x for x in vocab_size_dict.values()]
     self.param = config
     self.embedding = SumEmbedding(vocab_size_dict, config.dim)
-    self.layers = x_transformers.Decoder(dim=config.dim, depth=config.depth, num_heads=config.num_heads, cross_attend=True)
+    self.layers = x_transformers.Decoder(dim=config.dim, 
+                                         depth=config.depth, 
+                                         num_heads=config.num_heads, 
+                                         attn_dropout=config.dropout,
+                                         ff_dropout = config.dropout,
+                                         cross_attn_dropout = config.dropout,
+                                         cross_attend=True)
     self._make_projection_layer()
-    
-  def forward(self, x, enc_out, src_mask):
+    add_dropout_after_attn(self.layers, self.param.dropout)
+    add_dropout_after_ff(self.layers, self.param.dropout)
+
+  def forward(self, x, enc_out, src_mask, return_logits=False):
     mask = (x != 0)[..., -1]
     embedding = self.embedding(x)
     output = self.layers(embedding, context=enc_out, mask=mask, context_mask=src_mask)
     logit = self.proj(output)
+    if return_logits:
+      return logit
     dec_out = self._apply_softmax(logit)
     return dec_out
   
@@ -60,3 +77,21 @@ class TransDecoder(nn.Module):
     dur_token = prob[0, :, self.vocab_size[1]:].multinomial(num_samples=1)
     # dur_token = torch.argmax(prob.data[:, model.vocab_size[0]:], dim=-1)
     return torch.cat([pitch_token, dur_token], dim=-1)
+  
+  
+  
+  
+def add_dropout_after_attn(x_module:x_transformers.Encoder, dropout):
+  for layer in x_module.layers:
+    if 'Attention' in str(type(layer[1])): 
+      if isinstance(layer[1].to_out, nn.Sequential): # if GLU
+        layer[1].to_out.append(nn.Dropout(dropout))
+      elif isinstance(layer[1].to_out, nn.Linear): # if simple linear
+        layer[1].to_out = nn.Sequential(layer[1].to_out, nn.Dropout(dropout))
+      else:
+        raise ValueError('to_out should be either nn.Sequential or nn.Linear')
+
+def add_dropout_after_ff(x_module:x_transformers.Encoder, dropout):
+  for layer in x_module.layers:
+    if 'FeedForward' in str(type(layer[1])):
+      layer[1].ff.append(nn.Dropout(dropout))
