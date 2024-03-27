@@ -1,5 +1,5 @@
 general:
-  make_log: True
+  make_log: False
   debug: False
   exp_name: baseline
   num_exp: 1

@@ -76,7 +76,9 @@ def main(config: DictConfig):
     encoder_tokenizer = train_dataset.tokenizer
   else:
     encoder_tokenizer = train_dataset.era_dataset.tokenizer
-  model = model_class(encoder_tokenizer, train_dataset.tokenizer, config.model).to(device)
+  # model = model_class(encoder_tokenizer, train_dataset.tokenizer, config.model).to(device)
+  model = model_class(encoder_tokenizer, config.model).to(device)
+  print(model)
   if 'offset_fraction' in model.tokenizer.tok2idx:
     model.tokenizer.tok2idx.pop('offset_fraction')
   if 'offset' in model.tokenizer.tok2idx:
