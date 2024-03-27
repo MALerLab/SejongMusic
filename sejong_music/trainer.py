@@ -10,8 +10,8 @@ from music21 import stream, environment
 
 from .metric import get_similarity_with_inference, get_correspondence_with_inference
 from .utils import make_dynamic_template
-from .constants import MEAS_LEN_BY_IDX
-from .inference import sequential_inference
+from .constants import MEAS_LEN_BY_IDX, get_dynamic_template_for_orch
+from .inference import sequential_inference, Inferencer
 # from .yeominrak_processing import SamplingScore
 from .evaluation import fill_pitches
 from .decode import MidiDecoder, OrchestraDecoder
@@ -25,7 +25,7 @@ os.putenv("XDG_RUNTIME_DIR", environment.Environment().getRootTempDir())
 
 
 class Trainer:
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None):
+  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None, clip_grad_norm=1.0):
   # def __init__(self, **kwargs):
   #   for key, value in kwargs.items():
   #     setattr(self, key, value)  
@@ -36,6 +36,7 @@ class Trainer:
     self.train_loader = train_loader
     self.valid_loader = valid_loader
     self.midi_decoder = MidiDecoder(self.valid_loader.dataset.tokenizer)
+    self.clip_grad_norm = clip_grad_norm
 
     self.model.to(device)
     
@@ -58,6 +59,14 @@ class Trainer:
     self.measure_match = []
     self.pitch_similarity = []
     self.dynamic_similarity = []
+    
+    self.inferencer = Inferencer( model, 
+                              is_condition_shifted=model.is_condition_shifted,  
+                              is_orch=False,
+                              is_sep=False,
+                              temperature=1.0, 
+                              top_p=0.9)
+
     
   def train_by_num_epoch(self, num_epochs):
     pbar = tqdm(range(num_epochs))
@@ -98,7 +107,7 @@ class Trainer:
       if (epoch + 1) % 100 == 0:
         torch.save(self.model.state_dict(), self.save_dir / f'epoch{epoch+1}_model.pt')
       
-      if (epoch + 1) % 30 == 0 and epoch > 250:
+      if (epoch + 1) % 50 == 0 and epoch > 250:
         measure_match, similarity, dynamic_corr = self.make_inference_result()
         if similarity > self.best_pitch_sim:
           self.best_pitch_sim = similarity
@@ -132,10 +141,11 @@ class Trainer:
       input_part_idx = sample[0][0]
       target_part_idx = target[0][0]
       # if input_part_idx < 2: continue
-      if self.model.is_condition_shifted:
-        src, output, attn_map = self.model.shifted_inference(sample.to(self.device), target_part_idx)
-      else:
-        src, output, attn_map = self.model.inference(sample.to(self.device), target_part_idx)
+      src, output, attn_map = self.inferencer.inference(sample.to(self.device), target_part_idx)
+      # if self.model.is_condition_shifted:
+      #   src, output, attn_map = self.model.shifted_inference(sample.to(self.device), target_part_idx)
+      # else:
+      #   src, output, attn_map = self.model.inference(sample.to(self.device), target_part_idx)
       input_measure_len, output_measure_len = MEAS_LEN_BY_IDX[input_part_idx], MEAS_LEN_BY_IDX[target_part_idx]
       try:
         is_match = sum([note[2] for note in src])/input_measure_len == sum([note[2] for note in output])/output_measure_len
@@ -233,6 +243,7 @@ class Trainer:
     loss, _, loss_dict, attn_weight = self.get_loss_from_single_batch(batch)
     
     loss.backward()
+    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
     self.optimizer.step()
     self.optimizer.zero_grad()
     if self.scheduler is not None:
@@ -323,74 +334,27 @@ def get_pitch_dur_acc(pred, tgt, vocab_size, device):
 
 
 
-
-
-
-
-# ------------------ CNNTrainer ------------------ #
-
-class CNNTrainer(Trainer):
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device):
-    super().__init__(model, optimizer, loss_fn, train_loader, valid_loader, device)
-  
-
-  def get_loss_from_single_batch(self, batch):
-    src, tgt = batch
-    src = src.to(self.device)
-    tgt = tgt.to(self.device)
-    pred = self.model(src, tgt)
-    
-    batch_len = (tgt.shape[1] - (tgt[:, :, 1] == 0).sum(dim=1)).cpu()
-    tgt = pack_padded_sequence(tgt[:, :, 1], batch_len, batch_first=True, enforce_sorted=False)
-    pred = pack_padded_sequence(pred, batch_len, batch_first=True, enforce_sorted=False)
-
-    total_loss = self.loss_fn(pred.data, tgt.data)
-    
-    loss_dict = {'total_loss': total_loss.item()}
-    return total_loss, pred, loss_dict, None
-
-  def get_valid_loss_from_single_batch(self, batch):
-    src, tgt = batch
-    loss, pred, loss_dict, attention_weight = self.get_loss_from_single_batch(batch)
-    batch_len = (tgt.shape[1] - (tgt[:, :, 1] == 0).sum(dim=1)).cpu()
-    tgt = pack_padded_sequence(tgt[:, :, 1], batch_len, batch_first=True, enforce_sorted=False)
-
-    num_tokens = pred.data.shape[0]
-    pitch_acc = float(torch.sum(torch.argmax(pred.data, dim=-1) == tgt.data.to(self.device))) / num_tokens
-    
-    validation_loss = loss.item() * num_tokens
-    # num_total_tokens = num_tokens
-    # # validation_acc = acc.item()
-    # validation_acc = acc
-    loss_dict['pitch_acc'] = pitch_acc
-
-    # loss_dict['main_acc'] = main_acc.item()
-    # loss_dict['dur_acc'] = (dur_acc * is_note.sum() / num_tokens).item()
-
-    return pitch_acc, pitch_acc, pitch_acc, validation_loss, num_tokens, loss_dict
-
-
-
 class OrchestraTrainer(Trainer):
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None):
-    super().__init__(model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log, scheduler)
+  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None,clip_grad_norm=1.0):
+    super().__init__(model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log, scheduler,clip_grad_norm)
     self.midi_decoder = OrchestraDecoder(self.valid_loader.dataset.tokenizer)
+    self.inferencer = Inferencer( model, 
+                                  is_condition_shifted=True,  
+                                  is_orch=True,
+                                  is_sep=False,
+                                  temperature=1.0, 
+                                  top_p=0.9)
     if hasattr(self.valid_loader.dataset, 'era_dataset'):
       self.source_decoder = MidiDecoder(self.valid_loader.dataset.era_dataset.tokenizer)
     else:
       self.source_decoder = self.midi_decoder
 
-    self.dynamic_template = {x/2: 'weak' for x in range(0, 90, 3)}
-    self.dynamic_template[0.0] =  'strong'
-    self.dynamic_template[15.0] =  'strong'
-    self.dynamic_template[9.0] =  'middle'
-    self.dynamic_template[21.0] =  'middle'
-
+    self.dynamic_template = get_dynamic_template_for_orch()
     # self.dynamic_templates = [self.dynamic_template for _ in range(8)]
 
     self.dynamic_templates = []
     for part_idx in range(8):
-        frame = 6
+        frame = 4
         whole_measure_len = int(frame * 30)
         dynamic_list = []
         for i in range(whole_measure_len):
@@ -400,7 +364,7 @@ class OrchestraTrainer(Trainer):
 
 
   def make_inference_result(self, write_png=False, loader=None):
-    return 0, 0, 0
+    # return 0, 0, 0
     if loader is None:
       loader = self.valid_loader
     # self.model.to('cpu')
@@ -411,17 +375,13 @@ class OrchestraTrainer(Trainer):
     dynamic_corr = [0]
     for idx in selected_idx_list:
       sample, _, target = loader.dataset[idx]
-      target = self.model.converter(target[:-1])
-      input_part_idx = sample[0][0]
       target_part_idx = target[0][0]
+      target = self.model.converter(target[:-1])
+      input_part_idx = sample[1][0]
       # if input_part_idx < 2: continue
-      if self.model.is_condition_shifted:
-        src, output, attn_map = self.model.shifted_inference(sample.to(self.device), target_part_idx)
-      else:
-        src, output, attn_map = self.model.inference(sample.to(self.device), target_part_idx)
-      input_measure_len, output_measure_len = MEAS_LEN_BY_IDX[input_part_idx], 30.0
+      src, output, attn_map = self.inferencer.inference(sample.to(self.device), target_part_idx)
       try:
-        is_match = sum([note[2] for note in src])/input_measure_len == sum([note[2] for note in output])/output_measure_len
+        is_match = sum([note[2] for note in target]) == sum([note[2] for note in output])
       except Exception as e:
         print(f"Error occured in inference result: {e}")
         print(src)
@@ -429,14 +389,16 @@ class OrchestraTrainer(Trainer):
         print([note[2] for note in output])
         is_match = False
       measure_match += [is_match]
-      # if is_match:
-      #   similarity += [get_similarity_with_inference(target, output, self.dynamic_templates)]
-      #   dynamic_corr += [get_correspondence_with_inference(target, output, self.dynamic_templates)]
+      if is_match:
+        similarity += [get_similarity_with_inference(target, output, self.dynamic_templates, beat_sampling_num=4)]
+        dynamic_corr += [get_correspondence_with_inference(target, output, self.dynamic_templates, beat_sampling_num=4)]
       
       src_midi, output_midi = self.source_decoder(src), self.midi_decoder(output)
+      tgt_midi = self.midi_decoder(target)
 
       merged_midi = stream.Score()
-      merged_midi.insert(0, src_midi)
+      # merged_midi.insert(0, src_midi)
+      merged_midi.insert(0, tgt_midi)
       merged_midi.insert(0, output_midi)
       
       
@@ -466,113 +428,3 @@ class OrchestraTrainer(Trainer):
     self.model.to(self.device)
     return measure_match, similarity, dynamic_corr
 
-
-# ------------------ RollTrainer ------------------ # 
-
-
-class RollTrainer(Trainer):
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None):
-    super().__init__(model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log, scheduler)
-
-  def get_loss_from_single_batch(self, batch):
-    src, tgt, shifted_tgt = batch
-    src = src.to(self.device)
-    tgt = tgt.to(self.device)
-    pred, attn_weight = self.model(src, tgt)
-    pitch_loss = self.loss_fn(pred.data, shifted_tgt.data[:,1])
-    total_loss = pitch_loss
-    
-    loss_dict = {'pitch_loss': pitch_loss.item(), 'dur_loss': pitch_loss.item(), 'total_loss': total_loss.item()}
-    return total_loss, pred, loss_dict, attn_weight
-
-  def get_valid_loss_from_single_batch(self, batch):
-    src, _, shifted_tgt = batch
-    loss, pred, loss_dict, attention_weight = self.get_loss_from_single_batch(batch)
-    num_tokens = pred.data.shape[0]
-    pitch_acc = float(torch.sum(torch.argmax(pred.data, dim=-1) == shifted_tgt.to(self.device).data[:,1])) / num_tokens
-    main_acc = pitch_acc
-    
-    validation_loss = loss.item()
-
-    loss_dict['pitch_acc'] = pitch_acc
-    loss_dict['dur_acc'] = pitch_acc
-    loss_dict['main_acc'] = main_acc
-        
-    return main_acc, pitch_acc, pitch_acc, validation_loss, num_tokens, loss_dict
-
-
-  def visualize(self, num=1):
-    batch = next(iter(self.valid_loader))
-    src, dec_input, shifted_tgt = batch
-    src = src.to(self.device)
-    dec_input = dec_input.to(self.device)
-    
-    pred = self.model(src, dec_input)
-    pred = torch.nn.utils.rnn.pad_packed_sequence(pred, batch_first=True)[0].detach().cpu().numpy()
-    tgt = torch.nn.utils.rnn.pad_packed_sequence(shifted_tgt, batch_first=True)[0].detach().cpu().numpy()
-
-    plt.figure(figsize=(20, 10))
-    plt.subplot(2, 1, 1)
-    plt.imshow(pred[0].T, aspect='auto', interpolation='nearest')
-    plt.subplot(2, 1, 2)
-    plt.imshow(tgt[0].T, aspect='auto', interpolation='nearest')
-    plt.show()
-    plt.savefig(f'pred_{num}.png')
-    plt.close()
-
-
-  
-class RollPitchTrainer(RollTrainer):
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, advanced_metric=True):
-    super().__init__(model, optimizer, loss_fn, train_loader, valid_loader, device)
-    self.advanced_metric = advanced_metric
-  
-  def get_loss_from_single_batch(self, batch):
-    src, dec_input, tgt = batch
-    src = src.to(self.device)
-    dec_input = dec_input.to(self.device)
-    tgt = tgt.to(self.device)
-    pred = self.model(src, dec_input)
-    
-    pitch_loss = self.loss_fn(pred.data, tgt.data)
-    onset_loss = None
-    total_loss = pitch_loss#(pitch_loss + onset_loss) / 2
-    
-    loss_dict = {'pitch_loss': pitch_loss.item(), 'total_loss': total_loss.item()}
-    return total_loss, pred, loss_dict, None
-
-  def get_valid_loss_from_single_batch(self, batch):
-    src, dec_input, tgt = batch
-    loss, pred, loss_dict, _ = self.get_loss_from_single_batch(batch)
-    num_tokens = pred.data.shape[0]
-
-    if self.advanced_metric:
-      predicted_pitch_result = torch.argmax(pred.data, dim=-1)
-      predicted_pitch_result = PackedSequence(predicted_pitch_result, pred.batch_sizes, pred.sorted_indices, pred.unsorted_indices)
-    #   predicted_is_onset_result = pred.data[:, -1] >0.5
-    #   concated_result = torch.cat([predicted_pitch_result.unsqueeze(-1), predicted_is_onset_result.unsqueeze(-1)], dim=-1)
-    #   pitch_result = torch.argmax(pred.data[:, :self.model.vocab_size[1]], dim=-1)
-      filled_pitch_result = fill_pitches(predicted_pitch_result)
-      filled_tgt = fill_pitches(tgt)
-      filled_tgt = filled_tgt.to(filled_pitch_result.data.device)
-    #   fillted_tgt = fill_pitches(shifted_tgt.to(self.device).data[:,0])
-      pitch_acc = float(torch.sum(filled_pitch_result.data == filled_tgt.data)) / num_tokens
-
-    #   is_onset = shifted_tgt.to(self.device).data[:,1] != 0
-    #   onset_acc = float(torch.sum((pred.data[:, -1] >0.5)[is_onset] == shifted_tgt.to(self.device).data[:,1][is_onset]))  / is_onset.sum()
-
-    # else:
-    # pitch_acc = float(torch.sum(torch.argmax(pred.data, dim=-1) == shifted_tgt.to(self.device).data)) / num_tokens
-    # onset_acc = float(torch.sum( (pred.data[:, -1] >0.5) == shifted_tgt.to(self.device).data[:,1]))  / num_tokens
-
-    main_acc = pitch_acc
-    
-    validation_loss = loss.item() * num_tokens
-    loss_dict['pitch_acc'] = pitch_acc
-    # loss_dict['onset_acc'] = onset_acc
-    loss_dict['main_acc'] = main_acc
-
-    # loss_dict['main_acc'] = main_acc.item()
-    # loss_dict['dur_acc'] = (dur_acc * is_note.sum() / num_tokens).item()
-
-    return main_acc, pitch_acc, None, validation_loss, num_tokens, loss_dict

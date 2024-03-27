@@ -5,6 +5,7 @@ import torch
 from pathlib import Path
 from typing import List, Set, Dict, Tuple, Union
 from fractions import Fraction
+from fractions import Fraction
 
 from music21 import converter, stream, note as m21_note 
 
@@ -15,16 +16,16 @@ from .tokenizer import Tokenizer
 
 class AlignedScore:
   def __init__(self, xml_path='music_score/yeominlak.musicxml', 
-               valid_measure_num = [i for i in range(93, 104)],
-               slice_measure_num = 2, 
-               is_valid = False, 
-               use_pitch_modification=False, 
-               pitch_modification_ratio=0.0, 
-               min_meas=3, 
-               max_meas=6,
-               feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
-               sampling_rate=None,
-               start_part_idx=0) -> None:
+              valid_measure_num = [i for i in range(93, 104)],
+              slice_measure_num = 2, 
+              is_valid = False, 
+              use_pitch_modification=False, 
+              pitch_modification_ratio=0.0, 
+              min_meas=3, 
+              max_meas=6,
+              feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
+              sampling_rate=None,
+              start_part_idx=0) -> None:
         
     self.score = converter.parse(xml_path)
     # self.parts = [Part(part, i+start_part_idx) for i, part in enumerate(self.score.parts)]
@@ -57,7 +58,7 @@ class AlignedScore:
     if is_valid:
       self.valid_measure_num = valid_measure_num
       if valid_measure_num == 'entire':
-         self.valid_measure_num = list(range(len(self.measure_features[0])))
+        self.valid_measure_num = list(range(len(self.measure_features[0])))
     else:
       self.valid_measure_num = [i for i in range(len(self.measure_features[0])) 
                                 if i not in valid_measure_num 
@@ -253,16 +254,16 @@ class AlignedScore:
 
 class ShiftedAlignedScore(AlignedScore):
     def __init__(self, xml_path='0_edited.musicxml', 
-                 valid_measure_num = [i for i in range(93, 104)],
-                 slice_measure_num = 2, 
-                 is_valid = False, 
-                 use_pitch_modification=False, 
-                 pitch_modification_ratio=0.3, 
-                 min_meas=3, 
-                 max_meas=6,
-                 feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
-                 sampling_rate=None,
-                 start_part_idx=0) -> None:
+                valid_measure_num = [i for i in range(93, 104)],
+                slice_measure_num = 2, 
+                is_valid = False, 
+                use_pitch_modification=False, 
+                pitch_modification_ratio=0.3, 
+                min_meas=3, 
+                max_meas=6,
+                feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
+                sampling_rate=None,
+                start_part_idx=0) -> None:
         super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate, start_part_idx)
 
 
@@ -443,9 +444,9 @@ class OrchestraScore(ShiftedAlignedScore):
       return torch.LongTensor(source), torch.LongTensor(target), torch.LongTensor(shifted_target)        
         
   def __len__(self):
-     if self.is_valid:
+    if self.is_valid:
       return len(self.result_pairs)
-     return len(self.era_dataset)
+    return len(self.era_dataset)
 
   def __getitem__(self, idx):
     if self.is_valid:
@@ -601,7 +602,7 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
       return torch.LongTensor(source), torch.LongTensor(target), torch.LongTensor(shifted_target)        
         
   def __len__(self):
-     return len(self.slice_info)
+    return len(self.slice_info)
 
   def __getitem__(self, idx):
     front_part_idx = self.condition_instruments
@@ -610,7 +611,9 @@ class OrchestraScoreSeq(ShiftedAlignedScore):
     return src, tgt, shifted_tgt    
 
 class OrchestraScoreSeqTotal(OrchestraScoreSeq):
-  def __init__(self, xml_path='0_edited.musicxml', valid_measure_num=[i for i in range(88, 96)], slice_measure_num=2, is_valid=False, use_pitch_modification=False, pitch_modification_ratio=0.3, min_meas=3, max_meas=6, feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'], sampling_rate=None, target_instrument=0, is_sep=True) -> None:
+  def __init__(self, xml_path='0_edited.musicxml', valid_measure_num=[i for i in range(88, 96)], slice_measure_num=2, is_valid=False, use_pitch_modification=False,
+              pitch_modification_ratio=0.3, min_meas=3, max_meas=6, feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'], 
+              sampling_rate=None, target_instrument=0, is_sep=True) -> None:
     super().__init__(xml_path, valid_measure_num, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, min_meas, max_meas, feature_types, sampling_rate, target_instrument, is_sep)
   
   # @property

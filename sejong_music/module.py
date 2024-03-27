@@ -58,6 +58,8 @@ class MultiEmbedding(nn.Module):
   
   
 def get_emb_total_size(config):
+  if 'emb' not in config.model:
+    return config
   emb_param = config.model.emb
   config.model.features = list(config.model.emb.keys())[1:-1]
   total_size = 0 

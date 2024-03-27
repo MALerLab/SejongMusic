@@ -9,7 +9,7 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence, pack_padded_sequence
 
-from .constants import get_dynamic, MEAS_LEN_BY_IDX
+from .constants import get_dynamic, MEAS_LEN_BY_IDX, get_dynamic_template_for_orch
 from .yeominrak_processing import Tokenizer
 from .utils import convert_dynamics_to_integer, make_dynamic_template
 from .module import PackedDropout, MultiEmbedding, get_emb_total_size, Converter
@@ -537,11 +537,7 @@ class QkvAttnSeq2seqOrch(QkvAttnSeq2seqMore):
   def __init__(self, tokenizer, config):
     super().__init__(tokenizer, config)
     self.converter = Converter(tokenizer)
-    self.dynamic_template = {x/2: 'weak' for x in range(0, 90, 3)}
-    self.dynamic_template[0.0] =  'strong'
-    self.dynamic_template[15.0] =  'strong'
-    self.dynamic_template[9.0] =  'middle'
-    self.dynamic_template[21.0] =  'middle'
+    self.dynamic_template = get_dynamic_template_for_orch()
   
   def _make_encoder_and_decoder(self):
     self.encoder = EncoderWithDropout(self.vocab_size_dict, self.config)  
@@ -646,6 +642,12 @@ class QkvAttnSeq2seqOrch(QkvAttnSeq2seqMore):
     return self._decode_inference_result(src, cat_out, (attention_map, cat_out, newly_generated))
 
 
+class QkvAttnSeq2seqGMG(QkvAttnSeq2seqOrch):
+  def __init__(self, enc_tokenizer, tokenizer, config):
+    super().__init__(tokenizer, config)
+    self.converter = Converter(tokenizer)
+    self.encoder = Encoder(enc_tokenizer.vocab_size_dict, config)  
+    self.enc_converter = Converter(enc_tokenizer)
 
 
 
@@ -656,14 +658,32 @@ class TransSeq2seq(Seq2seq):
     # self.vocab_size_dict = self.tokenizer.vocab_size_dict
     
   def _make_encoder_and_decoder(self):
-    self.encoder = TransEncoder(self.vocab_size_dict, self.config.model)
-    self.decoder = TransDecoder(self.vocab_size_dict, self.config.model)
+    self.encoder = TransEncoder(self.vocab_size_dict, self.config)
+    self.decoder = TransDecoder(self.vocab_size_dict, self.config)
   
   def forward(self, src, tgt):
     enc_out, src_mask = self.encoder(src)
     dec_out = self.decoder(tgt, enc_out, src_mask)
     return dec_out, None
   
+  def _run_inference_on_step(self, final_tokens, encoder_output):
+    enc_out, enc_mask = encoder_output['encode_out'], encoder_output['enc_mask']
+    logit = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    return logit[:, -1:], encoder_output, torch.zeros_like(enc_out) # TODO: Return attention weights
+
+  def run_encoder(self, src):
+    assert src.ndim == 2
+    enc_out, enc_mask = self.encoder(src.unsqueeze(0)) 
+    return {"encode_out": enc_out, "enc_mask": enc_mask}
+
+  def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output):
+    dev = prev_generation.device
+    start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 3, 3, 5]]).to(dev)], dim=-1)
+    final_tokens = torch.cat([prev_generation, start_token], dim=0)
+    current_measure_idx = 2
+
+    return [final_tokens[i:i+1] for i in range(len(final_tokens))], current_measure_idx, encoder_output
+
   def shifted_inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
     dev = src.device
     assert src.ndim == 2

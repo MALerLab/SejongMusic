@@ -133,17 +133,20 @@ def get_correspondence(sampled_notes, idx_1, idx_2):
   return sum(correspondence)/len(correspondence)
 
 
-def get_similarity_with_inference(src:List[Union[int, float, str]], output:List[Union[int, float, str]], dynamic_templates):
-  sampled_src = convert_note_to_sampling_with_str(src, dynamic_templates)
-  smpled_output = convert_note_to_sampling_with_str(output, dynamic_templates)
+def get_similarity_with_inference(src:List[Union[int, float, str]], 
+                                  output:List[Union[int, float, str]], 
+                                  dynamic_templates,
+                                  beat_sampling_num=6):
+  sampled_src = convert_note_to_sampling_with_str(src, dynamic_templates, beat_sampling_num=beat_sampling_num)
+  smpled_output = convert_note_to_sampling_with_str(output, dynamic_templates, beat_sampling_num=beat_sampling_num)
   
   measure_similarity = sum([note_1[1]==note_2[1] for note_1, note_2 in zip(sampled_src, smpled_output)])/len(sampled_src)
 
   return measure_similarity
 
-def get_correspondence_with_inference(src, output, dynamic_templates):
-  sampled_src = convert_note_to_sampling_with_str(src, dynamic_templates)
-  smpled_output = convert_note_to_sampling_with_str(output, dynamic_templates)
+def get_correspondence_with_inference(src, output, dynamic_templates, beat_sampling_num=6):
+  sampled_src = convert_note_to_sampling_with_str(src, dynamic_templates, beat_sampling_num=beat_sampling_num)
+  smpled_output = convert_note_to_sampling_with_str(output, dynamic_templates, beat_sampling_num=beat_sampling_num)
   strong_beat_a, strong_beat_b = [], []
   for j, note in enumerate(sampled_src):
     if note[3] in ['strong', 'middle']:

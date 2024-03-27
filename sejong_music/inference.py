@@ -7,10 +7,10 @@ from music21 import stream
 
 from sejong_music import yeominrak_processing, model_zoo
 from sejong_music.yeominrak_processing import OrchestraScoreSeq, pack_collate
-from sejong_music.model_zoo import Seq2seq, QkvAttnSeq2seqOrch, get_emb_total_size
+from sejong_music.model_zoo import Seq2seq, QkvAttnSeq2seqOrch, get_emb_total_size, TransSeq2seq
 from sejong_music.utils import convert_note_to_sampling, convert_onset_to_sustain_token, make_offset_set
 from sejong_music.sampling_utils import nucleus
-
+from sejong_music.constants import get_dynamic_template_for_orch, get_dynamic
 
 
 class Inferencer:
@@ -19,7 +19,8 @@ class Inferencer:
                is_condition_shifted: bool, 
                is_orch: bool, 
                is_sep: bool, 
-               temperature: float = 1.0):
+               temperature: float = 1.0,
+               top_p: float = 1.0):
     self.model = model
     self.is_condition_shifted = is_condition_shifted
     self.is_orch = is_orch
@@ -29,8 +30,15 @@ class Inferencer:
     self.vocab_size_dict = self.tokenizer.vocab_size_dict
     self.vocab_size = self.model.vocab_size
     if self.is_orch:
-      self.dynamic_template = self.model.dynamic_template
-      
+      self.dynamic_template = get_dynamic_template_for_orch()
+    self.temperature = temperature
+    self.top_p = top_p
+  
+  
+  @property
+  def device(self):
+    return self.model.parameters().__next__().device
+  
   def get_start_token(self, part_idx):
     num_features = len(self.vocab_size_dict) - 1
     # token_features = [self.tokenizer.tok2idx['index'][part_idx]]
@@ -107,6 +115,13 @@ class Inferencer:
       jeonggan_offset = self.tokenizer.tok2idx['jeonggan_offset'][jeonggan]
       beat_offset = self.tokenizer.tok2idx['beat_offset'][beat]
       condition_features += [daegang_offset, jeonggan_offset, beat_offset]
+    
+    elif 'jeonggan_offset' in self.tokenizer.tok2idx:
+      jeonggan_value = current_beat // 1
+      jeonggan_offset = self.tokenizer.tok2idx['jeonggan_offset'][jeonggan_value]
+      beat_offset_value = Fraction(current_beat % 1).limit_denominator(3)
+      beat_offset = self.tokenizer.tok2idx['beat_offset'][beat_offset_value]
+      condition_features += [jeonggan_offset, beat_offset]
       
     if 'dynamic' in self.tokenizer.tok2idx:
       if self.is_orch:
@@ -114,7 +129,7 @@ class Inferencer:
         dynamic_idx = self.tokenizer.tok2idx['dynamic'][dynamic]
         condition_features.append(dynamic_idx)
       else:
-        dynamic = self.get_dynamic(current_beat, part_idx)
+        dynamic = get_dynamic(current_beat, part_idx)
         dynamic_idx = self.tokenizer.tok2idx['dynamic'][dynamic]
         condition_features.append(dynamic_idx)
         
@@ -131,18 +146,19 @@ class Inferencer:
     return torch.cat([pitch_output, dur_output], dim=-1) 
 
   def sampling_process(self, logit):
+    logit = logit / self.temperature
     prob = self._apply_softmax(logit)
     selected_token = self._select_token(prob)
     return selected_token
     
-  def _select_token(self, prob: torch.Tensor, top_p=0.7):
+  def _select_token(self, prob: torch.Tensor):
     tokens = []
     # print(prob.shape)
     pitch_prob = prob[0, :, :self.vocab_size[1]]
     dur_prob = prob[0, :, self.vocab_size[1]:]
-    if top_p != 1.0:
-      pitch_token = nucleus(pitch_prob, top_p)
-      dur_token = nucleus(dur_prob, top_p)
+    if self.top_p != 1.0:
+      pitch_token = nucleus(pitch_prob, self.top_p)
+      dur_token = nucleus(dur_prob, self.top_p)
     else:
       pitch_token = pitch_prob.multinomial(num_samples=1)
       dur_token = dur_prob.multinomial(num_samples=1)
@@ -190,11 +206,19 @@ class Inferencer:
     return current_beat, current_measure_idx, measure_changed  
   
   def _decode_inference_result(self, src, output, other_out):
-    return self.converter(src[1:-1]), self.converter(output), other_out
+    if hasattr(self.model, 'enc_converter'):
+      return self.model.enc_converter(src[1:-1]), self.converter(output), other_out
+    src_decoded = self.converter(src[1:-1])
+    out_decoded = self.converter(output)
+    if sum(type(y[2])==str for y in out_decoded) > 0:
+      print('Warning: There is a string in the output!')
+      print(out_decoded)
+    return src_decoded, out_decoded, other_out
 
   @torch.inference_mode()
-  def shifted_inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
-    dev = src.device
+  def inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
+    dev = self.device
+    src = src.to(dev)
 
     # Setup for 0th step
     # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
@@ -206,7 +230,7 @@ class Inferencer:
     
     encoder_output: dict = self.model.run_encoder(src)
 
-    final_tokens = []
+    final_tokens = [start_token] if isinstance(self.model, TransSeq2seq) else []
     if prev_generation is not None:
       final_tokens, current_measure_idx, encoder_output = self.model._apply_prev_generation(prev_generation, final_tokens, encoder_output)
     selected_token = start_token
@@ -219,7 +243,8 @@ class Inferencer:
     condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
 
     for i in range(300):
-      logit, encoder_output, attention_weight = self.model._run_inference_on_step(selected_token, encoder_output)
+      input_token = torch.cat(final_tokens, dim=0) if isinstance(self.model, TransSeq2seq) else selected_token
+      logit, encoder_output, attention_weight = self.model._run_inference_on_step(input_token, encoder_output)
       selected_token = self.sampling_process(logit)
       if fix_first_beat and current_beat - compensate_beat[1] == 0.0:
         for src_token in src:
@@ -240,7 +265,7 @@ class Inferencer:
       current_beat, current_measure_idx, measure_changed = self.update_condition_info(current_beat, current_measure_idx, measure_duration, current_dur)
       if 'measure_idx' in self.tokenizer.tok2idx and current_measure_idx > self.tokenizer.vocab['measure_idx'][-1]:
         break
-      if float(current_beat) == 10.0:
+      if float(current_beat) == 10.0 and not self.is_orch:
         print(f"Current Beat ==10.0 detected! cur_beat: {current_beat}, measure_dur: {measure_duration}, cur_measure_idx: {current_measure_idx}, cur_dur: {current_dur}, triplet_sum: {triplet_sum}")
       condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
       
@@ -253,9 +278,13 @@ class Inferencer:
       attention_map = None
     else:
       attention_map = torch.stack(total_attention_weights, dim=1)
+    if isinstance(self.model, TransSeq2seq): final_tokens = final_tokens[1:]
     cat_out = torch.cat(final_tokens, dim=0)
-    newly_generated = cat_out.clone()
-    if prev_generation is not None:
+    if isinstance(self.model, TransSeq2seq) and prev_generation is not None:
+      newly_generated = cat_out[len(prev_generation):]
+    else:
+      newly_generated = cat_out.clone()
+    if prev_generation is not None and not isinstance(self.model, TransSeq2seq):
       cat_out = torch.cat([prev_generation[1:], cat_out], dim=0)
     #  self.converter(src[1:-1]), self.converter(torch.cat(final_tokens, dim=0)), attention_map
 
