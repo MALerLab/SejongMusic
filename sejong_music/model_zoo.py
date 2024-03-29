@@ -14,9 +14,11 @@ from .yeominrak_processing import Tokenizer
 from .utils import convert_dynamics_to_integer, make_dynamic_template
 from .module import PackedDropout, MultiEmbedding, get_emb_total_size, Converter
 from .sampling_utils import nucleus
-from .transformer_module import TransEncoder, TransDecoder
+from .transformer_module import TransEncoder, TransDecoder, JeongganTransEncoder, JeongganTransDecoder
 from .model_layers import Encoder, Decoder, AttnDecoder, QkvAttnDecoder, QkvAttnDecoderMore, EncoderWithDropout, get_attention_vector
 import x_transformers
+from x_transformers.x_transformers import AbsolutePositionalEmbedding
+
 
 
 def read_yaml(yml_path):
@@ -654,12 +656,14 @@ class QkvAttnSeq2seqGMG(QkvAttnSeq2seqOrch):
 class TransSeq2seq(Seq2seq):
   def __init__(self, tokenizer, config):
     super().__init__(tokenizer, config)
-    # self.tokenizer = tokenizer
-    # self.vocab_size_dict = self.tokenizer.vocab_size_dict
-    
+
+    self.decoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 120)
+
+
   def _make_encoder_and_decoder(self):
-    self.encoder = TransEncoder(self.vocab_size_dict, self.config)
-    self.decoder = TransDecoder(self.vocab_size_dict, self.config)
+    self.encoder = JeongganTransEncoder(self.vocab_size_dict, self.config)
+    self.decoder = JeongganTransDecoder(self.vocab_size_dict, self.config)
+
   
   def forward(self, src, tgt):
     enc_out, src_mask = self.encoder(src)
@@ -773,6 +777,130 @@ class TransSeq2seq(Seq2seq):
         #  self.converter(src[1:-1]), self.converter(torch.cat(final_tokens, dim=0)), attention_map
     return self._decode_inference_result(src, cat_out, (attention_map, cat_out, newly_generated))
 
+class JeongganTransSeq2seq(Seq2seq):
+  def __init__(self, tokenizer, config):
+    self.vocab_size = len(tokenizer.vocab)
+    self.pred_vocab_size = tokenizer.pred_vocab_size
+    super().__init__(tokenizer, config)
+    # self.tokenizer = tokenizer
+    # self.vocab_size_dict = self.tokenizer.vocab_size_dict
+
+  def _make_encoder_and_decoder(self):
+    self.encoder = JeongganTransEncoder(self.vocab_size, self.config)
+    self.decoder = JeongganTransDecoder(self.vocab_size, self.pred_vocab_size, self.config)
+    
+  
+  def forward(self, src, tgt):
+    enc_out, src_mask = self.encoder(src)
+    dec_out = self.decoder(tgt, enc_out, src_mask)
+    return dec_out, None
+  
+  def _run_inference_on_step(self, final_tokens, encoder_output):
+    enc_out, enc_mask = encoder_output['encode_out'], encoder_output['enc_mask']
+    logit = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    return logit[:, -1:], encoder_output, torch.zeros_like(enc_out) # TODO: Return attention weights
+
+  def run_encoder(self, src):
+    assert src.ndim == 2
+    enc_out, enc_mask = self.encoder(src.unsqueeze(0))
+    return {"encode_out": enc_out, "enc_mask": enc_mask}
+
+  def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output):
+    dev = prev_generation.device
+    start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 3, 3, 5]]).to(dev)], dim=-1)
+    final_tokens = torch.cat([prev_generation, start_token], dim=0)
+    current_measure_idx = 2
+
+    return [final_tokens[i:i+1] for i in range(len(final_tokens))], current_measure_idx, encoder_output
+
+  def shifted_inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
+    dev = src.device
+    assert src.ndim == 2
+    enc_out, enc_mask = self.encoder(src.unsqueeze(0)) 
+
+    # Setup for 0th step
+    # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
+    start_token = self.get_start_token(part_idx).to(dev)
+
+    #-------------
+    # not_triplet_vocab_list = [ i for i, dur in enumerate(self.tokenizer.vocab['duration'][3:], 3) if (dur%0.5) != 0.0]
+    #-------------
+    measure_duration = self._get_measure_duration(part_idx)
+    current_measure_idx = 0
+    measure_changed = 1
+
+    final_tokens = [start_token]
+    if prev_generation is not None:
+      final_tokens, current_measure_idx, last_hidden = self._apply_prev_generation(prev_generation, final_tokens, last_hidden, enc_out)
+      # emb = self.decoder._get_embedding(prev_generation)
+      # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+      # start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
+      # final_tokens.append(start_token)
+      # current_measure_idx = 2
+    selected_token = start_token
+
+    current_beat = Fraction(0, 1)
+
+    total_attention_weights = []
+    # while True:
+    triplet_sum = 0 
+    condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
+
+    for i in range(300):
+      # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+      # attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+      # combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+      # combined_value, last_hidden, attention_weight = self._run_inference_on_step(emb, last_hidden, encode_out)
+      prob = self.decoder(torch.cat(final_tokens, dim=0).unsqueeze(0), enc_out, enc_mask)
+      selected_token = self.decoder._select_token(prob[:, -1:])
+      # for rule_base fixing
+      if fix_first_beat and current_beat - compensate_beat[1] == 0.0:
+        for src_token in src:
+          if src_token[-1] == condition_tokens[-1] and self.tokenizer.vocab['offset'][src_token[3].item()] - compensate_beat[0] == 0.0:
+            # if measure_idx is same and offset is same
+            selected_token[0, 0] = src_token[1] # get pitch from src
+            break
+      
+      if selected_token[0, 0]==self.tokenizer.tok2idx['pitch']['end'] or selected_token[0, 1]==self.tokenizer.tok2idx['duration']['end']:
+        break
+      
+      # update beat position and beat strength
+      current_dur = self.tokenizer.vocab['duration'][selected_token[0, 1]]
+      if Fraction(current_dur).limit_denominator(3).denominator == 3:
+        triplet_sum += Fraction(current_dur).limit_denominator(3).numerator
+      elif triplet_sum != 0:
+        # print("Triplet has to appear but not", current_dur,)
+        triplet_sum += 1
+        # print(current_dur, selected_token)
+        current_dur = Fraction(1,3)
+        selected_token = torch.LongTensor([[selected_token[0,0], self.tokenizer.tok2idx['duration'][current_dur]]]).to(dev)
+        # print(current_dur, selected_token)
+      else:
+        triplet_sum = 0
+      if triplet_sum == 3:
+        triplet_sum = 0
+      current_beat, current_measure_idx, measure_changed = self.update_condition_info(current_beat, current_measure_idx, measure_duration, current_dur)
+      if 'measure_idx' in self.tokenizer.tok2idx and current_measure_idx > self.tokenizer.vocab['measure_idx'][-1]:
+        break
+      if float(current_beat) == 10.0:
+        print(f"Current Beat ==10.0 detected! cur_beat: {current_beat}, measure_dur: {measure_duration}, cur_measure_idx: {current_measure_idx}, cur_dur: {current_dur}, triplet_sum: {triplet_sum}")
+      condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
+      # make new token for next rnn timestep
+      selected_token = torch.cat([torch.LongTensor([[part_idx]]).to(dev), selected_token, torch.LongTensor([condition_tokens]).to(dev)], dim=1)
+      
+      final_tokens.append(selected_token)
+      
+    if len(total_attention_weights) == 0:
+      attention_map = None
+    else:
+      attention_map = torch.stack(total_attention_weights, dim=1)
+      
+    cat_out = torch.cat(final_tokens[1:], dim=0) #token shape: [1,6] => [24,6]
+    newly_generated = cat_out.clone()
+    if prev_generation is not None:
+      cat_out = torch.cat([prev_generation[1:], cat_out], dim=0)
+        #  self.converter(src[1:-1]), self.converter(torch.cat(final_tokens, dim=0)), attention_map
+    return self._decode_inference_result(src, cat_out, (attention_map, cat_out, newly_generated))
 
 
 
@@ -782,6 +910,7 @@ class TransSeq2seq(Seq2seq):
 
 
 
+    
 
 
 if __name__ == "__main__":

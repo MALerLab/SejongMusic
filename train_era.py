@@ -21,7 +21,7 @@ def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
   return f'{current_time_in_str}_{config.general.exp_name}_{config.dataset_class}_{config.model_class}'
 
-@hydra.main(config_path='./yamls/', config_name='transformer')
+@hydra.main(config_path='./yamls/', config_name='transformer_orchestration')
 def main(config: DictConfig):
   if not config.model_class == 'TransSeq2seq':
     config = get_emb_total_size(config)

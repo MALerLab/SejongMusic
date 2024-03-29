@@ -24,15 +24,30 @@ model:
     - index
     - pitch
     - duration
-    - jeonggan_offset
-    - beat_offset
+    - offset
     - dynamic
     - measure_idx
     # - measure_change
   dim: 64
   depth: 4
   num_heads: 4
-  dropout: 0.2
+  emb:
+    emb_size: 128
+    index: 0.25
+    pitch: 0.5
+    duration: 0.5
+    daegang_offset: 0.25
+    jeonggan_offset: 0.25
+    beat_offset: 0.25
+    dynamic: 0.25
+    measure_idx: 0.25
+    # measure_change: 0.25
+    total_size: 0
+  sampling_rate: 2  
+  transformer:
+    dim: 64
+    depth: 3
+    num_heads: 4
 
 train:
   batch_size: 64

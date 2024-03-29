@@ -1,5 +1,5 @@
 general:
-  make_log: True
+  make_log: False
   debug: False
   exp_name: baseline
   num_exp: 1
@@ -8,8 +8,6 @@ param_yaml: 'yeominrak_feature_ratio.yaml'
 
 dataset_class: OrchestraScoreSeq
 model_class: QkvAttnSeq2seqOrch
-collate_fn: pack_collate
-loss_fn: nll_loss
 
 
 data:
