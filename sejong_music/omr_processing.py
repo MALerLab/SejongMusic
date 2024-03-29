@@ -8,53 +8,25 @@ from collections import defaultdict, Counter
 from music21 import converter, stream, note as m21_note 
 from pathlib import Path
 import torch
-
-POSITION = [f":{i}" for i in range(0, 16)]
-PITCH = [ '하하배임','하배황', '하배태', '하배중', '하배임', '하배남', '하배무',
-          '배황', '배태', '배중', '배임', '배남', '배무',
-          '황', '태', '중', '임', '남', '무', 
-          '청황', '청태', '청중', '청임', '청남', '청협']
-PART = ['daegeum', 'piri', 'haegeum', 'gayageum', 'geomungo', 'ajaeng']
+from .tokenizer import JeongganTokenizer
+from .constants import POSITION, PITCH, PART
 
 def read_txt(path):
   with open(path, 'r') as file:
     return file.read()
   
-class JeongganTokenizer:
-    def __init__(self, parts, feature_types=['index', 'token', 'position'], pitch_token=PITCH, position_token=POSITION):
-        self.parts = parts
-        self.key_types = feature_types
-        vocab_list = defaultdict(list)
-        special_token = sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in pitch_token + position_token+ ['|']])
-        vocab_list['index'] = [i for i in range(len(self.parts)+1)]
-        vocab_list['token'] = ['start', 'end'] + ['|']+ pitch_token + position_token + special_token
-        vocab_list['position'] = ['start', 'end'] + position_token
-        self.vocab = vocab_list
-        self.tok2idx = {key: {k:i for i, k in enumerate(value)} for key, value in self.vocab.items() }  
-        self.note2token = {}  
-    
-    def hash_note_feature(self, note_feature):
-        assert isinstance(note_feature, list)
-        out = [self.tok2idx[self.key_types[i]][element] for i, element in enumerate(note_feature)]
-        return out
-        
-    def __call__(self, note_feature:List[Union[int, float, str]]):  
-        converted_lists = self.hash_note_feature(note_feature)
-        return converted_lists
-      
-
 class JeongganDataset:
   def __init__(self, data_path= Path('music_score/gencode'), 
-               valid_measure_num = [i for i in range(93, 104)],
-               slice_measure_num = 2,
-               is_valid=False,
-               use_pitch_modification=False,
-               pitch_modification_ratio=0.3,
-               min_meas=3,
-               max_meas=6,
-               feature_types=['index', 'token', 'position'],
-               part_list = PART, position_token = POSITION, pitch_token = PITCH, 
-               target_instrument=0):
+              valid_measure_num = [i for i in range(93, 104)],
+              slice_measure_num = 2,
+              is_valid=False,
+              use_pitch_modification=False,
+              pitch_modification_ratio=0.3,
+              min_meas=3,
+              max_meas=6,
+              feature_types=['index', 'token', 'position'],
+              part_list = PART, position_token = POSITION, pitch_token = PITCH, 
+              target_instrument=0):
     
     self.data_path = data_path
     self.is_valid = is_valid
@@ -81,7 +53,6 @@ class JeongganDataset:
       
     self.position_list = position_token
 
-
   def update_slice_info(self, min_meas=4, max_meas=6):
     split_num_list = []
     for i in range(len(self.valid_measure_num)-min_meas):
@@ -104,7 +75,8 @@ class JeongganDataset:
     scores = [read_txt(text) for text in texts]
     all_score = []
     for instrument in scores:
-      measures = [[s for s in measure.split(' ') if s] for measure in instrument.split('\n')]
+      measure_raw = [measure+' \n' for measure in instrument.split('\n')]
+      measures = [[s for s in measure.split(' ') if s] for measure in measure_raw]
       all_score.append(measures)
     return all_score
   
@@ -133,7 +105,7 @@ class JeongganDataset:
       targets = self.get_position_feature(original_target_list)
       target_list = [target_start_token] + targets
       shifted_target_list = targets + [target_end_token]
-
+      # return source_list, target_list, shifted_target_list
       source = [self.tokenizer(note_feature) for note_feature in source_list]
       target = [self.tokenizer(note_feature) for note_feature in target_list]
       shifted_target = [self.tokenizer(note_feature) for note_feature in shifted_target_list]
@@ -141,15 +113,13 @@ class JeongganDataset:
       return torch.LongTensor(source), torch.LongTensor(target), torch.LongTensor(shifted_target)    
   
   def __len__(self):
-    if self.is_valid:
-      return len(self.result_pairs) # TODO: result_paris 만들기
-    return len(self.slice_info)-1
+    return len(self.slice_info)
 
   def __getitem__(self, idx):
     front_part_idx = self.condition_instruments
     back_part_idx = self.target_instrument
     src, tgt, shifted_tgt = self.get_processed_feature(front_part_idx, back_part_idx, idx)          
-    return src, tgt, shifted_tgt    
+    return src, tgt, shifted_tgt   
 
 if __name__ == '__main__':
 
