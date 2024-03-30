@@ -4,13 +4,15 @@ from torch.utils.data import DataLoader
 from omegaconf import DictConfig, OmegaConf
 from fractions import Fraction
 from music21 import stream
+from tqdm.auto import tqdm
 
 from sejong_music import yeominrak_processing, model_zoo
 from sejong_music.yeominrak_processing import OrchestraScoreSeq, pack_collate
-from sejong_music.model_zoo import Seq2seq, QkvAttnSeq2seqOrch, get_emb_total_size, TransSeq2seq
+from sejong_music.model_zoo import Seq2seq, QkvAttnSeq2seqOrch, get_emb_total_size, TransSeq2seq, JeongganTransSeq2seq
 from sejong_music.utils import convert_note_to_sampling, convert_onset_to_sustain_token, make_offset_set
 from sejong_music.sampling_utils import nucleus
 from sejong_music.constants import get_dynamic_template_for_orch, get_dynamic
+from sejong_music.jg_code import POSITION
 
 
 class Inferencer:
@@ -292,6 +294,106 @@ class Inferencer:
     
 
 
+class JGInferencer(Inferencer):
+  def __init__(self, model: JeongganTransSeq2seq, 
+               is_condition_shifted: bool, 
+               is_orch: bool, 
+               temperature: float = 1, 
+               top_p: float = 1):
+    super().__init__(model, is_condition_shifted, is_orch, is_sep=False, temperature=temperature, top_p=top_p)
+    
+  def get_start_token(self, inst:str):
+    return torch.LongTensor(self.tokenizer(['start', 'prev|', 'jg:0', 'gak:0', inst])).unsqueeze(0)
+  
+  
+  def encode_condition_token(self, prev_pos_token, current_jg_idx, current_gak_idx, inst_name):
+    return self.tokenizer([f'prev{prev_pos_token}', f'jg:{current_jg_idx}', f'gak:{current_gak_idx}', inst_name])
+    
+  def _decode_inference_result(self, src, output, other_out):
+    src_decoded = self.tokenizer.decode(src[1:-1])
+    out_decoded = self.tokenizer.decode(output)
+    return src_decoded, out_decoded, other_out
+  
+  def _apply_softmax(self, logit):
+    prob = torch.softmax(logit, dim=-1)
+    return prob
+  
+  def _select_token(self, prob: torch.Tensor):
+    if prob.ndim == 3:
+      prob = prob[:, 0]
+    return nucleus(prob, self.top_p) if self.top_p != 1.0 else prob.multinomial(num_samples=1)
+  
+  @torch.inference_mode()
+  def inference(self, src, inst_name:str, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
+    dev = self.device
+    src = src.to(dev)
+
+    # Setup for 0th step
+    # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
+    start_token = self.get_start_token(inst_name).to(dev)
+    assert src.ndim == 2 # sequence length, feature length
+    current_gak_idx = 0
+    current_jg_idx = 0
+    prev_pos_token = '|'
+    
+    encoder_output: dict = self.model.run_encoder(src)
+
+    final_tokens = [start_token]
+    if prev_generation is not None:
+      final_tokens, current_measure_idx, encoder_output = self.model._apply_prev_generation(prev_generation, final_tokens, encoder_output)
+    selected_token = start_token
+    
+
+    total_attention_weights = []
+    # while True:
+    condition_tokens = self.encode_condition_token(prev_pos_token, current_jg_idx, current_gak_idx, inst_name)
+
+    for i in tqdm(range(500), leave=False):
+      input_token = torch.cat(final_tokens, dim=0) if isinstance(self.model, JeongganTransSeq2seq) else selected_token
+      logit, encoder_output, attention_weight = self.model._run_inference_on_step(input_token, encoder_output)
+      selected_token = self.sampling_process(logit)
+      decoded_token = self.tokenizer.vocab[selected_token[0]]
+      
+      if decoded_token == 'end': break
+      
+      if decoded_token in self.tokenizer.pos_vocab:
+        prev_pos_token = decoded_token
+
+      if decoded_token == '|':
+        current_jg_idx += 1
+
+      if decoded_token == '\n':
+        current_gak_idx += 1
+        current_jg_idx = 0
+      
+      if f'jg:{current_jg_idx}' not in self.tokenizer.vocab or f'gak:{current_gak_idx}' not in self.tokenizer.vocab:
+        break
+        
+      condition_tokens = self.encode_condition_token(prev_pos_token, current_jg_idx, current_gak_idx, inst_name)
+      
+      # make new token for next rnn timestep
+      selected_token = torch.cat([selected_token, torch.LongTensor([condition_tokens]).to(dev)], dim=1)
+      
+      final_tokens.append(selected_token)
+      total_attention_weights.append(attention_weight[0,:,0])
+    if len(total_attention_weights) == 0:
+      attention_map = None
+    else:
+      attention_map = torch.stack(total_attention_weights, dim=1)
+    if isinstance(self.model, TransSeq2seq): final_tokens = final_tokens[1:]
+    cat_out = torch.cat(final_tokens, dim=0)
+    if isinstance(self.model, TransSeq2seq) and prev_generation is not None:
+      newly_generated = cat_out[len(prev_generation):]
+    else:
+      newly_generated = cat_out.clone()
+    if prev_generation is not None and not isinstance(self.model, TransSeq2seq):
+      cat_out = torch.cat([prev_generation[1:], cat_out], dim=0)
+    #  self.converter(src[1:-1]), self.converter(torch.cat(final_tokens, dim=0)), attention_map
+
+    return self._decode_inference_result(src, cat_out, (attention_map, cat_out, newly_generated))
+    
+
+    
 
 def sequential_inference(model:Seq2seq, sample:torch.Tensor, decoder):
   s = stream.Score(id='mainScore')

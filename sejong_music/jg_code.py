@@ -32,7 +32,7 @@ class JeongganPiece:
     self.parts, self.part_dict = self.split_to_inst()
     self.check_measure_length()
     self.tokenized_parts = [self.split_and_filter(part) for part in self.parts]
-    self.token_count = self.count_token()
+    self.token_counter = self.count_token()
     self.sliced_parts_by_inst, self.sliced_parts_by_measure = self.prepare_sliced_measures()
     
   def split_to_inst(self):
@@ -113,12 +113,30 @@ class JeongganTokenizer:
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
         self.vocab_size_dict = {'total': len(self.vocab)}
+        self.pos_vocab = POSITION
+        self.note2token = {}
+    
+    # def __call__(self, note_feature:Union[List[str], str]):
+    #     if isinstance(note_feature, list):
+    #       if isinstance(note_feature[0], list):
+    #         return [self.hash_note_feature(tuple(x)) for x in note_feature]
+    #       else:
+    #         return [self(x) for x in note_feature]
+    #     return self.tok2idx[note_feature]
     
     def __call__(self, note_feature:Union[List[str], str]):
         if isinstance(note_feature, list):
-          return [self(x) for x in note_feature] 
-        return self.tok2idx[note_feature ]
-    
+          return [self(x) for x in note_feature]
+        return self.tok2idx[note_feature]      
+      
+    # def hash_note_feature(self, note_feature:Tuple[Union[int, float, str]]):
+    #     try:
+    #         return self.note2token[note_feature]
+    #     except:
+    #         out = [self.tok2idx[x] for x in note_feature]
+    #         self.note2token[note_feature] =  out
+    #         return out
+        
     def save_to_json(self, json_fn):
         with open(json_fn, 'w') as f:
             json.dump(self.vocab, f)
@@ -126,7 +144,17 @@ class JeongganTokenizer:
     def load_from_json(self, json_fn):
         with open(json_fn, 'r') as f:
             self.vocab = json.load(f)
-        self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
+        self.tok2idx = {value:i for i, value in enumerate(self.vocab) }
+        self.pred_vocab_size = self.vocab.index(PART[0])
+        self.vocab_size_dict = {'total': len(self.vocab)}
+        self.pos_vocab = POSITION
+        
+    def decode(self, idx:Union[torch.Tensor, List[int], int]):
+        if isinstance(idx, torch.Tensor):
+          idx = idx.tolist()
+        if isinstance(idx, list):
+          return [self.decode(x) for x in idx]
+        return self.vocab[idx]
 
             
 class JeongganDataset:
@@ -149,7 +177,7 @@ class JeongganDataset:
     texts = glob.glob(str(data_path / '*.txt'))
     all_pieces = [JeongganPiece(text) for text in texts]
     self.all_pieces = [x for x in all_pieces if x.is_clean]
-    unique_token = list(set([key for piece in self.all_pieces for key in piece.token_count.keys() ]))
+    unique_token = list(set([key for piece in self.all_pieces for key in piece.token_counter.keys() ]))
     self.tokenizer = JeongganTokenizer(unique_token, feature_types=feature_types)
     self.vocab = self.tokenizer.vocab
     self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
@@ -159,8 +187,6 @@ class JeongganDataset:
     # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
 
     self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
-
-
 
   def __len__(self):
     return len(self.entire_segments)
@@ -252,7 +278,7 @@ class JeongganDataset:
       condition_instruments = insts_of_piece[1:3]
     else:
       target_instrument = random.choice(insts_of_piece)
-      condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, 2))
+      condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, len(insts_of_piece)-2))
 
     
     src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)          

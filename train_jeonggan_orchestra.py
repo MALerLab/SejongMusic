@@ -31,7 +31,8 @@ def main(config: DictConfig):
       project="yeominrak", 
       entity="danbinaerin", 
       name = make_experiment_name_with_date(config), 
-      config = OmegaConf.to_container(config)
+      config = OmegaConf.to_container(config),
+      dir=Path(hydra.utils.get_original_cwd())
     )
     save_dir = Path(wandb.run.dir) / 'checkpoints'
   else:
@@ -70,7 +71,11 @@ def main(config: DictConfig):
   collate_fn = getattr(utils, config.collate_fn)
   loss_fn = getattr(loss, config.loss_fn)
 
-  train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size , shuffle=True, collate_fn=collate_fn)
+  train_loader = DataLoader(train_dataset, 
+                            batch_size=config.train.batch_size , 
+                            shuffle=True, 
+                            collate_fn=collate_fn,
+                            num_workers=4)
   valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=True)
 
   device = 'cuda'
@@ -116,7 +121,7 @@ def main(config: DictConfig):
                                 scheduler=scheduler)
 
     atrainer.iteration = total_iteration
-    atrainer.train_by_num_epoch(config.train.num_epoch)
+    atrainer.train_by_num_iteration(config.train.num_epoch * len(train_loader))
     atrainer.load_best_model()
 
     atrainer.make_inference_result(write_png=True)

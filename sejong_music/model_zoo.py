@@ -797,13 +797,15 @@ class JeongganTransSeq2seq(Seq2seq):
   
   def _run_inference_on_step(self, final_tokens, encoder_output):
     enc_out, enc_mask = encoder_output['encode_out'], encoder_output['enc_mask']
-    logit = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    kv_cache = encoder_output['kv_cache']
+    # logit, _ = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    logit, encoder_output['kv_cache'] = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True, cache=kv_cache)
     return logit[:, -1:], encoder_output, torch.zeros_like(enc_out) # TODO: Return attention weights
 
   def run_encoder(self, src):
     assert src.ndim == 2
     enc_out, enc_mask = self.encoder(src.unsqueeze(0))
-    return {"encode_out": enc_out, "enc_mask": enc_mask}
+    return {"encode_out": enc_out, "enc_mask": enc_mask, 'kv_cache': None}
 
   def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output):
     dev = prev_generation.device

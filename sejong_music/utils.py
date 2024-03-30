@@ -417,5 +417,9 @@ def convert_note_to_sampling(measure, dynamic_templates, beat_sampling_num = 6):
   return new_measure
 
 def convert_onset_to_sustain_token(roll_array: np.ndarray):
-  roll_array[roll_array[:,2]!=1, 1] = 0
-  return roll_array[:, [0,1,3,4]]
+    roll_array[roll_array[:,2]!=1, 1] = 0
+    return roll_array[:, [0,1,3,4]]
+
+def read_txt(path):
+    with open(path, 'r') as file:
+        return file.read()

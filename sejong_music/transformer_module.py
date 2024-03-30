@@ -131,14 +131,16 @@ class JeongganTransDecoder(nn.Module):
     add_dropout_after_attn(self.layers, self.param.dropout)
     add_dropout_after_ff(self.layers, self.param.dropout)
 
-  def forward(self, x, enc_out, src_mask, return_logits=False):
+  def forward(self, x, enc_out, src_mask, return_logits=False, cache=None):
     mask = (x != 0)[..., -1]
     embedding = self.embedding(x)
     embedding += self.decoder_pos_enc(embedding)
+    if return_logits:
+      output, intermediates = self.layers(embedding, context=enc_out, mask=None, context_mask=src_mask, cache=cache, return_hiddens=True)
+      logit = self.proj(output)
+      return logit, intermediates
     output = self.layers(embedding, context=enc_out, mask=mask, context_mask=src_mask)
     logit = self.proj(output)
-    if return_logits:
-      return logit
     dec_out = self._apply_softmax(logit)
     return dec_out
   

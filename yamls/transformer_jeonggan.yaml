@@ -1,0 +1,38 @@
+general:
+  make_log: True
+  debug: False
+  exp_name: baseline
+  num_exp: 1
+inference_dir: inference_img/
+param_yaml: 'yeominrak_feature_ratio.yaml'
+
+dataset_class: JeongganDataset
+model_class: JeongganTransSeq2seq
+loss_fn: nll_loss_transformer
+collate_fn: pad_collate_transformer
+
+
+
+data:
+  use_pitch_modification: True
+  modification_ratio: 0.3
+  min_meas: 4
+  max_meas: 4
+  sampling_rate: 2
+  target_instrument: 0
+
+model:
+  dim: 64
+  depth: 4
+  num_heads: 4
+  dropout: 0.2
+
+train:
+  batch_size: 16
+  # total_iters: 25000
+  num_epoch: 600
+  seed: 42
+  num_workers: 8
+  lr: 1e-3
+
+

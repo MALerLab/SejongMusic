@@ -11,7 +11,7 @@ from music21 import stream, environment
 from .metric import get_similarity_with_inference, get_correspondence_with_inference
 from .utils import make_dynamic_template
 from .constants import MEAS_LEN_BY_IDX, get_dynamic_template_for_orch
-from .inference import sequential_inference, Inferencer
+from .inference import sequential_inference, Inferencer, JGInferencer
 # from .yeominrak_processing import SamplingScore
 from .evaluation import fill_pitches
 from .decode import MidiDecoder, OrchestraDecoder
@@ -25,7 +25,20 @@ os.putenv("XDG_RUNTIME_DIR", environment.Environment().getRootTempDir())
 
 
 class Trainer:
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None, clip_grad_norm=1.0):
+  def __init__(self, 
+               model, 
+               optimizer, 
+               loss_fn, 
+               train_loader, 
+               valid_loader, 
+               device, 
+               save_dir, 
+               save_log=True, 
+               scheduler=None, 
+               clip_grad_norm=1.0,
+               epoch_per_infer=50,
+               min_epoch_for_infer=250,
+               use_fp16=False):
   # def __init__(self, **kwargs):
   #   for key, value in kwargs.items():
   #     setattr(self, key, value)  
@@ -37,7 +50,12 @@ class Trainer:
     self.valid_loader = valid_loader
     self.midi_decoder = MidiDecoder(self.valid_loader.dataset.tokenizer)
     self.clip_grad_norm = clip_grad_norm
-
+    self.epoch_per_infer = epoch_per_infer
+    self.min_epoch_for_infer = min_epoch_for_infer
+    self.use_fp16 = use_fp16
+    if self.use_fp16:
+      self.scaler = torch.cuda.amp.GradScaler()
+      
     self.model.to(device)
     
     self.best_valid_accuracy = 0
@@ -67,6 +85,55 @@ class Trainer:
                               temperature=1.0, 
                               top_p=0.9)
 
+    
+  def train_by_num_iteration(self, num_iterations):
+    pbar = tqdm(range(num_iterations))
+    train_loader_iter = iter(self.train_loader)
+    num_iter_per_epoch = len(self.train_loader)
+    for iteration in pbar:
+      self.model.train()
+      try:
+        batch = next(train_loader_iter)
+      except StopIteration:
+        train_loader_iter = iter(self.train_loader)
+        batch = next(train_loader_iter)
+      loss_value, train_loss_dict, attn_weight = self._train_by_single_batch(batch)
+      self.training_loss.append(loss_value)
+
+      if iteration % 100 == 0:
+        self.model.eval()
+        validation_loss, validation_acc, valid_loss_dict, valid_pitch_acc, valid_dur_acc = self.validate()
+        self.pitch_acc.append(valid_pitch_acc)
+        self.dur_acc.append(valid_dur_acc)
+        self.valid_loss_dict = valid_loss_dict
+        self.validation_loss.append(validation_loss)
+        self.validation_acc.append(validation_acc)
+        if self.save_log:
+          wandb.log({'validation.loss': validation_loss}, step=self.iteration)
+          wandb.log({'validation.acc': validation_acc}, step=self.iteration)
+          wandb.log({'validation.pitch_acc': valid_pitch_acc}, step=self.iteration)
+          wandb.log({'validation.dur_acc': valid_dur_acc}, step=self.iteration)
+          wandb.log({'attn_weight': attn_weight}, step=self.iteration)
+        # valid_acc가 가장 높은 모델을 저장
+        pbar.set_description(f"Acc: {validation_acc:.4f}, Loss: {validation_loss:.4f}")
+        if validation_acc > self.best_valid_accuracy:
+          self.best_valid_accuracy = validation_acc
+          torch.save(self.model.state_dict(), self.save_dir / 'best_model.pt')
+          # print(f'Best Model Saved! Accuracy: {validation_acc}')
+        if validation_loss < self.best_valid_loss:
+          self.best_valid_loss = validation_loss
+          torch.save(self.model.state_dict(), self.save_dir / 'best_loss_model.pt')
+        
+      if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0:
+        torch.save(self.model.state_dict(), self.save_dir / f'iter{iteration+1}_model.pt')
+      
+      if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0 and iteration  > self.min_epoch_for_infer * num_iter_per_epoch:
+        self.model.eval()
+        measure_match, similarity, dynamic_corr = self.make_inference_result()
+        if similarity > self.best_pitch_sim:
+          self.best_pitch_sim = similarity
+          torch.save(self.model.state_dict(), self.save_dir / 'best_pitch_sim_model.pt')
+        self.model.train()
     
   def train_by_num_epoch(self, num_epochs):
     pbar = tqdm(range(num_epochs))
@@ -107,7 +174,7 @@ class Trainer:
       if (epoch + 1) % 100 == 0:
         torch.save(self.model.state_dict(), self.save_dir / f'epoch{epoch+1}_model.pt')
       
-      if (epoch + 1) % 50 == 0 and epoch > 250:
+      if (epoch + 1) % self.epoch_per_infer == 0 and epoch > self.min_epoch_for_infer:
         measure_match, similarity, dynamic_corr = self.make_inference_result()
         if similarity > self.best_pitch_sim:
           self.best_pitch_sim = similarity
@@ -242,10 +309,18 @@ class Trainer:
   def _train_by_single_batch(self, batch):  
     loss, _, loss_dict, attn_weight = self.get_loss_from_single_batch(batch)
     
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-    self.optimizer.step()
-    self.optimizer.zero_grad()
+    if self.use_fp16:
+      with torch.cuda.amp.autocast(dtype=torch.float16):
+        self.scaler.scale(loss).backward()
+        self.scaler.unscale_(self.optimizer)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+    else:
+      loss.backward()
+      torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+      self.optimizer.step()
+      self.optimizer.zero_grad()
     if self.scheduler is not None:
       self.scheduler.step()
     if self.save_log:
@@ -427,4 +502,112 @@ class OrchestraTrainer(Trainer):
     
     self.model.to(self.device)
     return measure_match, similarity, dynamic_corr
+
+
+class JeongganTrainer(Trainer):
+  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None, clip_grad_norm=1, use_fp16=True):
+    super().__init__(model, 
+                     optimizer, 
+                     loss_fn, 
+                     train_loader, 
+                     valid_loader, 
+                     device, 
+                     save_dir, 
+                     save_log, 
+                     scheduler, 
+                     clip_grad_norm,
+                     epoch_per_infer=50,
+                     min_epoch_for_infer=5,
+                     use_fp16=use_fp16)
+    self.inferencer = JGInferencer(model, True, True, 1.0, 0.9)
+
+    
+  
+  
+  def get_loss_from_single_batch(self, batch):
+    src, tgt, shifted_tgt = batch
+    src = src.to(self.device)
+    tgt = tgt.to(self.device)
+    if self.use_fp16:
+      with torch.cuda.amp.autocast():
+        pred, attn_weight = self.model(src, tgt)
+        loss = self.loss_fn(pred, shifted_tgt)
+    else:
+      pred, attn_weight = self.model(src, tgt)
+      loss = self.loss_fn(pred, shifted_tgt)
+
+    loss_dict = {'total_loss': loss.item()}
+    return loss, pred, loss_dict, attn_weight
+
+
+  def get_valid_loss_from_single_batch(self, batch):
+    _, _, shifted_tgt = batch
+    loss, pred, loss_dict, attention_weight = self.get_loss_from_single_batch(batch)
+    
+
+    mask = shifted_tgt != 0 # 2-dim
+    mask = mask.to(self.device)
+    num_tokens = mask.sum()
+    acc = float(torch.sum((torch.argmax(pred, dim=-1) == shifted_tgt.to(self.device))*mask)) / num_tokens
+    validation_loss = loss.item()
+
+    loss_dict['main_acc'] = acc
+        
+    return acc, acc, acc, validation_loss, num_tokens, loss_dict
+  
+  
+  def make_inference_result(self, write_png=False, loader=None):
+    if loader is None:
+      loader = self.valid_loader
+    # self.model.to('cpu')
+    # for idx in range(self.valid_loader.batch_size):
+    selected_idx_list = [i for i in range(10)]
+    measure_match = []
+    similarity = []
+    dynamic_corr = []
+    # dynamic_templates = make_dynamic_template(offset_list=MEAS_LEN_BY_IDX)
+    for idx in selected_idx_list:
+      sample, tgt, shifted_tgt = loader.dataset[idx]
+      # if isinstance(self.train_loader.dataset, SamplingScore):
+      #   target = self.model.converter(target)
+      # else:
+      input_part_idx = sample[0][-1]
+      target_part_idx = self.model.tokenizer.vocab[tgt[0][-1].item()]
+      # if input_part_idx < 2: continue
+      src, output, attn_map = self.inferencer.inference(sample.to(self.device), target_part_idx)
+      print('Gen Result:')
+      print(output[:5])
+      # if self.model.is_condition_shifted:
+      #   src, output, attn_map = self.model.shifted_inference(sample.to(self.device), target_part_idx)
+      # else:
+      #   src, output, attn_map = self.model.inference(sample.to(self.device), target_part_idx)
+      '''
+      input_measure_len, output_measure_len = MEAS_LEN_BY_IDX[input_part_idx], MEAS_LEN_BY_IDX[target_part_idx]
+      try:
+        is_match = sum([note[2] for note in src])/input_measure_len == sum([note[2] for note in output])/output_measure_len
+      except Exception as e:
+        print(f"Error occured in inference result: {e}")
+        print(src)
+        print(output)
+        print([note[2] for note in output])
+        is_match = False
+      measure_match += [is_match]
+      if is_match:
+        similarity += [get_similarity_with_inference(target, output, dynamic_templates)]
+        dynamic_corr += [get_correspondence_with_inference(target, output, dynamic_templates)]
+      
+      src_midi, output_midi = self.midi_decoder(src), self.midi_decoder(output)
+
+      merged_midi = stream.Score()
+      merged_midi.insert(0, src_midi)
+      merged_midi.insert(0, output_midi)
+      
+      
+      if write_png:
+        merged_midi.write('musicxml.png', fp=str(self.save_dir / f'{input_part_idx}-{target_part_idx}.png'))
+        if self.save_log:
+          wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
+                    step=self.iteration)
+      '''
+    return 0, 0, 0
 
