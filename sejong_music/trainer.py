@@ -15,6 +15,7 @@ from .inference import sequential_inference, Inferencer, JGInferencer
 # from .yeominrak_processing import SamplingScore
 from .evaluation import fill_pitches
 from .decode import MidiDecoder, OrchestraDecoder
+from jg_to_staff_converter import JGToStaffConverter
 
 
 us=environment.UserSettings()
@@ -520,7 +521,7 @@ class JeongganTrainer(Trainer):
                      min_epoch_for_infer=5,
                      use_fp16=use_fp16)
     self.inferencer = JGInferencer(model, True, True, 1.0, 0.9)
-
+    self.decoder = JGToStaffConverter(dur_ratio=1.5)
     
   
   
@@ -575,8 +576,20 @@ class JeongganTrainer(Trainer):
       target_part_idx = self.model.tokenizer.vocab[tgt[0][-1].item()]
       # if input_part_idx < 2: continue
       src, output, attn_map = self.inferencer.inference(sample.to(self.device), target_part_idx)
-      print('Gen Result:')
-      print(output[:5])
+      try:
+        note_dict, stream = self.decoder.convert_inference_result(output, src, self.model.tokenizer.decode(shifted_tgt))
+        if write_png:
+          stream.write('musicxml.png', fp=str(self.save_dir / f'{input_part_idx}-{target_part_idx}.png'))
+          if self.save_log:
+            wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
+                      step=self.iteration)
+      except:
+        print(f"Error occured in inference result: {e}")
+        print(src)
+        print(output)
+        print([note[2] for note in output])
+        is_match = False
+
       # if self.model.is_condition_shifted:
       #   src, output, attn_map = self.model.shifted_inference(sample.to(self.device), target_part_idx)
       # else:

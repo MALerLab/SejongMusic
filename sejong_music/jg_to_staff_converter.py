@@ -308,7 +308,7 @@ class SigimsaeConverter:
           return pitch
 
 
-class NoteConverter:
+class JGToStaffConverter:
   pos_tokens = POSITION[2:] # exclude '|', '\n'
   pitch_converter = SigimsaeConverter()
   pitch_names = ["황" ,'대' ,'태' ,'협' ,'고' ,'중' ,'유' ,'임' ,'이' ,'남' ,'무' ,'응']
@@ -563,7 +563,7 @@ class NoteConverter:
     if scale is None:
       scale, exceptional_pitches = self.get_scale(notes)
       print('scales:', scale)
-    if len(scale) < 5:
+    if len(scale) < 4:
       self.pitch_converter = SigimsaeConverter()
     else:
       self.pitch_converter = SigimsaeConverter(scale=scale, exceptional_pitches=exceptional_pitches)
@@ -589,6 +589,31 @@ class NoteConverter:
       entire_stream.insert(0, stream)
     return entire_notes, entire_stream
 
+  def convert_inference_result(self,
+                               inf_out:List[List[str]], 
+                               source:List[List[str]]=None,
+                               gt:List[str]=None):
+    output_str = [x[0] for x in inf_out]
+    output_note, output_stream = self(output_str)
+    source_stream = music21.stream.Score()
+    note_dict = {'output': output_note}
+    if source is not None:
+      source_insts_total = [x[-1] for x in source]
+      source_insts = list(set(source_insts_total))
+      source_insts.sort(key=lambda x: source_insts_total.index(x))
+      source_strs = []
+      for inst in source_insts:
+          source_strs.append(' '.join([x[0] for x in source if x[-1] == inst]))
+      source_strs = ' \n\n '.join(source_strs)
+      note_dict['source'], source_stream = self.convert_multi_track(source_strs)
+      
+      
+    if gt is not None:
+      note_dict['gt'], gt_stream = self(gt)
+      source_stream.insert(0, gt_stream)
+    source_stream.insert(0, output_stream)
+    
+    return note_dict, source_stream
 
 class Symbol:
   def __init__(self, text:str, offset=0):

@@ -275,7 +275,7 @@ class JeongganDataset:
     insts_of_piece = list(self.entire_segments[idx].keys())
     if self.is_valid:
       target_instrument = insts_of_piece[0]
-      condition_instruments = insts_of_piece[1:3]
+      condition_instruments = insts_of_piece[1:]
     else:
       target_instrument = random.choice(insts_of_piece)
       condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, len(insts_of_piece)-2))
