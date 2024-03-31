@@ -5,7 +5,6 @@ from typing import List, Set, Dict, Tuple, Union
 from fractions import Fraction
 from collections import defaultdict
 from .utils import  as_fraction, FractionEncoder
-from .constants import POSITION, PITCH
 
 
 class Tokenizer:
@@ -82,27 +81,4 @@ class Tokenizer:
         converted_lists = self.hash_note_feature(tuple(note_feature))
         # feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx']
         # converted_lists = [self.tok2idx[self.key_types[i]][element] for i, element in enumerate(note_feature)]
-        return converted_lists
-
-
-class JeongganTokenizer:
-    def __init__(self, parts, feature_types=['instrument', 'token', 'position'], pitch_token=PITCH, position_token=POSITION):
-        self.parts = parts
-        self.key_types = feature_types
-        vocab_list = defaultdict(list)
-        special_token = sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in pitch_token + position_token+ ['|']])
-        vocab_list['instrument'] = [i for i in range(len(self.parts)+1)]
-        vocab_list['token'] = ['start', 'end'] + ['|', '\n'] + pitch_token + position_token + special_token
-        vocab_list['position'] = ['start', 'end'] + position_token
-        self.vocab = vocab_list
-        self.tok2idx = {key: {k:i for i, k in enumerate(value)} for key, value in self.vocab.items() }  
-        self.note2token = {}  
-    
-    def hash_note_feature(self, note_feature):
-        assert isinstance(note_feature, list)
-        out = [self.tok2idx[self.key_types[i]][element] for i, element in enumerate(note_feature)]
-        return out
-        
-    def __call__(self, note_feature:List[Union[int, float, str]]):  
-        converted_lists = self.hash_note_feature(note_feature)
         return converted_lists
