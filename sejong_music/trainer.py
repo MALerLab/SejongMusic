@@ -15,7 +15,7 @@ from .inference import sequential_inference, Inferencer, JGInferencer
 # from .yeominrak_processing import SamplingScore
 from .evaluation import fill_pitches
 from .decode import MidiDecoder, OrchestraDecoder
-from jg_to_staff_converter import JGToStaffConverter
+from .jg_to_staff_converter import JGToStaffConverter
 
 
 us=environment.UserSettings()
@@ -557,7 +557,7 @@ class JeongganTrainer(Trainer):
     return acc, acc, acc, validation_loss, num_tokens, loss_dict
   
   
-  def make_inference_result(self, write_png=False, loader=None):
+  def make_inference_result(self, write_png=True, loader=None):
     if loader is None:
       loader = self.valid_loader
     # self.model.to('cpu')
@@ -583,7 +583,7 @@ class JeongganTrainer(Trainer):
           if self.save_log:
             wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
                       step=self.iteration)
-      except:
+      except Exception as e:
         print(f"Error occured in inference result: {e}")
         print(src)
         print(output)
