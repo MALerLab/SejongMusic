@@ -109,6 +109,8 @@ def apply_tie(notes: List[music21.note.Note], part_idx) -> List[music21.note.Not
                 tied_notes[-1] += note
             else:
                 raise ValueError(f'Unknown tie type: {note.tie.type}')
+        elif note.isRest and len(tied_notes) > 0 and tied_notes[-1].pitch == 0:
+            tied_notes[-1] += note
         else:
             tied_notes.append(Gnote(note, part_idx))
         
