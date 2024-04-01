@@ -153,4 +153,5 @@ class JGConverter:
     for o in octave_name.keys():
       for i, p in enumerate(pitch_name):
         pitch2midi[o+p] = i + 63 + octave_name[o] * 12
+    # pitch2midi['쉼표'] = 0
     return pitch2midi

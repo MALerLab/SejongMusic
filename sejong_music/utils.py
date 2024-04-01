@@ -101,6 +101,8 @@ def apply_tie(notes: List[music21.note.Note], part_idx) -> List[music21.note.Not
         if note.tie is not None:
             if note.tie.type == 'start':
                 tied_notes.append(Gnote(note, part_idx))
+            elif len(tied_notes) == 0:
+                tied_notes.append(Gnote(music21.note.Rest(duration=note.duration), part_idx))
             elif note.tie.type == 'continue':
                 tied_notes[-1] +=  note
             elif note.tie.type == 'stop':
