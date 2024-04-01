@@ -38,6 +38,7 @@ class JeongganPiece:
   def split_to_inst(self):
     self.daegeum, self.piri, self.haegeum, self.ajaeng, self.gayageum, self.geomungo = None, None, None, None, None, None
     parts = self.text_str.split('\n\n')
+    parts = [part + ' \n ' for part in parts]
     for i, inst in enumerate(self.inst_list):
       setattr(self, inst, parts[i])
     return parts, {inst: part for inst, part in zip(self.inst_list, parts)}
@@ -240,9 +241,9 @@ class JeongganDataset:
 
       last_condition = []
       last_tokens = {'inst': note_list[0][self.feature_types.index('inst')],
-                     'in_jg_position': '|', 
+                     'in_jg_position': 'prev\n', 
                      'jg_offset': 'jg:0',
-                      'gak_offset': 'gak:0'}
+                      'gak_offset': f'gak:{int(note_list[-1][self.feature_types.index("gak_offset")][4:])+1}'}
       for feature in self.feature_types:
         if feature == 'token': continue
         last_condition.append(last_tokens[feature])
