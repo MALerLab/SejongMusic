@@ -17,7 +17,7 @@ class JGConverter:
       num_measures = len(part)
       part_text = []
       for i in range(1, num_measures):
-        notes_in_measure = list(part.measures(i, i).flat.notes)
+        notes_in_measure = list(part.measures(i, i).flat.notesAndRests)
         tie_cleaned_notes = apply_tie(notes_in_measure, 99)
         conv_jgs = self.list_of_m21_notes_to_jeonggan(tie_cleaned_notes)
         text_jgs = self.jeonggan_note_to_text(conv_jgs)
@@ -29,6 +29,8 @@ class JGConverter:
 
   def list_of_m21_notes_to_jeonggan(self, sel_meas:List[Gnote]): 
     conv_jgs = [[] for _ in range(self.num_jeonggan_per_gak)]
+    # if len(sel_meas) != 0 and sel_meas[0].pitch == 0:
+    #   sel_meas = sel_meas[1:]
     for note in sel_meas:
       cur_jg = conv_jgs[int(note.offset//self.jql)]
       jg_offset = note.offset % self.jql
@@ -153,4 +155,5 @@ class JGConverter:
     for o in octave_name.keys():
       for i, p in enumerate(pitch_name):
         pitch2midi[o+p] = i + 63 + octave_name[o] * 12
+    pitch2midi['쉼표'] = 0
     return pitch2midi

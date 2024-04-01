@@ -13,25 +13,26 @@ from sejong_music import yeominrak_processing, model_zoo, loss, utils
 from sejong_music.yeominrak_processing import pack_collate
 from sejong_music.model_zoo import get_emb_total_size
 from sejong_music.loss import nll_loss, focal_loss
-from sejong_music.trainer import OrchestraTrainer
+from sejong_music.trainer import JeongganTrainer
 from sejong_music.train_utils import CosineLRScheduler
+# from sejong_music.constants import PART, POSITION, PITCH
+from sejong_music.jg_code import JeongganDataset
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
   return f'{current_time_in_str}_{config.general.exp_name}_{config.dataset_class}_{config.model_class}'
 
-@hydra.main(config_path='yamls/', config_name='orchestration')
+@hydra.main(config_path='yamls/', config_name='transformer_jeonggan')
 def main(config: DictConfig):
   config = get_emb_total_size(config)
   
-  assert 'duration' in config.model.features, 'Duration should be included in the feature list.'
-
   if config.general.make_log:
     wandb.init(
       project="yeominrak", 
-      entity="maler", 
+      entity="danbinaerin", 
       name = make_experiment_name_with_date(config), 
-      config = OmegaConf.to_container(config)
+      config = OmegaConf.to_container(config),
+      dir=Path(hydra.utils.get_original_cwd())
     )
     save_dir = Path(wandb.run.dir) / 'checkpoints'
   else:
@@ -41,71 +42,54 @@ def main(config: DictConfig):
   if not save_dir.is_absolute():
     save_dir = original_wd / save_dir
   save_dir.mkdir(parents=True, exist_ok=True)
-  dataset_class = getattr(yeominrak_processing, config.dataset_class)
-  valid_dataset_class = yeominrak_processing.OrchestraScoreSeq if config.dataset_class=='OrchestraScoreSeqTotal' else dataset_class
+  # dataset_class = JeongganDataset
   model_class = getattr(model_zoo, config.model_class)
-  train_dataset = dataset_class(is_valid= False, 
-                                xml_path=original_wd/'music_score/FullScore_edit5.musicxml',
-                                use_pitch_modification = config.data.use_pitch_modification, 
-                                pitch_modification_ratio=config.data.modification_ratio,
-                                min_meas=config.data.min_meas, 
-                                max_meas=config.data.max_meas,
-                                feature_types=copy.copy(config.model.features),
-                                sampling_rate=config.data.sampling_rate,
-                                target_instrument=config.data.target_instrument,
-                                is_sep = config.data.is_sep
-                                )
-  val_dataset = valid_dataset_class(is_valid= True,
-                              # valid_measure_num = [i for i in range(93, 99)],
-                              xml_path=original_wd/'music_score/FullScore_edit5.musicxml', 
-                              use_pitch_modification=False, 
-                              slice_measure_num=config.data.max_meas,
-                              min_meas=config.data.min_meas,
-                              feature_types=copy.copy(config.model.features),
-                              sampling_rate=config.data.sampling_rate,
-                              target_instrument=config.data.target_instrument,
-                              is_sep=config.data.is_sep)
+  
+  train_dataset = JeongganDataset(data_path= Path('/home/danbi/userdata/DANBI/gugakwon/SejongMusic/music_score/gen_code'), 
+                  # slice_measure_num = 2,
+                  is_valid=False,
+                  # use_pitch_modification=False,
+                  # pitch_modification_ratio=0.3,
+                  # min_meas=3,
+                  # max_meas=6,
+                  # feature_types=['index', 'token', 'position'],
+                  # target_instrument='daegeum'
+                  )
+  
+  val_dataset = JeongganDataset(data_path= Path('/home/danbi/userdata/DANBI/gugakwon/SejongMusic/music_score/gen_code'), 
+                  # slice_measure_num = 2,
+                  is_valid=True,
+                  # use_pitch_modification=False,
+                  # pitch_modification_ratio=0.3,
+                  # min_meas=3,
+                  # max_meas=6,
+                  # feature_types=['index', 'token', 'position'],
+                  # part_list = PART, position_token = POSITION, pitch_token = PITCH, 
+                  # target_instrument=0
+                  )
     
   collate_fn = getattr(utils, config.collate_fn)
   loss_fn = getattr(loss, config.loss_fn)
 
-  train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size , shuffle=True, collate_fn=collate_fn)
+  train_loader = DataLoader(train_dataset, 
+                            batch_size=config.train.batch_size , 
+                            shuffle=True, 
+                            collate_fn=collate_fn,
+                            num_workers=4)
   valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=True)
 
   device = 'cuda'
   total_iteration = 0
-  if isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
-    encoder_tokenizer = train_dataset.tokenizer
-  else:
-    encoder_tokenizer = train_dataset.era_dataset.tokenizer
-  if 'offset_fraction' in train_dataset.tokenizer.tok2idx: # Orchestra does not uses offset_fraction
-    train_dataset.tokenizer.tok2idx.pop('offset_fraction')
-  if 'offset' in train_dataset.tokenizer.tok2idx: # Fill in the missing offset
-    for i in range(120):
-      if i % 4 == 0:
-        continue
-      if i / 4 not in train_dataset.tokenizer.tok2idx['offset']:
-        train_dataset.tokenizer.tok2idx['offset'][i/4] = train_dataset.tokenizer.tok2idx['offset'][(i-2)/4]
+
   
   # --- Save config and tokenizer --- #
   with open(save_dir / 'config.yaml', 'w') as f:
     OmegaConf.save(config, f)
   tokenizer_vocab_path = save_dir / 'tokenizer_vocab.json'
   train_dataset.tokenizer.save_to_json(tokenizer_vocab_path)
-  if isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
-    train_dataset.tokenizer.save_to_json(save_dir/'era_tokenizer_vocab.json')
-  else:
-    train_dataset.era_dataset.tokenizer.save_to_json(save_dir/'era_tokenizer_vocab.json')
 
-  if isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeqTotal):
-    repeat = 1
-    val_dataset.target_instrument = 1
-  elif isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
-    repeat = 4
-  else:
-    raise NotImplementedError
   
-  
+  repeat = 4
   for target_inst_idx in range(repeat):
     if not isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeqTotal) and isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
       train_dataset.target_instrument = target_inst_idx
@@ -126,7 +110,7 @@ def main(config: DictConfig):
 
     # --- Training --- #
     inst_save_dir = save_dir / f'inst_{target_inst_idx}'
-    atrainer = OrchestraTrainer(model=model, 
+    atrainer = JeongganTrainer(model=model, 
                                 optimizer=optimizer, 
                                 loss_fn=loss_fn, 
                                 train_loader=train_loader, 
@@ -137,7 +121,7 @@ def main(config: DictConfig):
                                 scheduler=scheduler)
 
     atrainer.iteration = total_iteration
-    atrainer.train_by_num_epoch(config.train.num_epoch)
+    atrainer.train_by_num_iteration(config.train.num_epoch * len(train_loader))
     atrainer.load_best_model()
 
     atrainer.make_inference_result(write_png=True)
