@@ -10,10 +10,11 @@ import torch
 
 
 POSITION = ['|', '\n']+ [f":{i}" for i in range(0, 16)]
-PITCH = [ '하하배임','하배황', '하배태', '하배중', '하배임', '하배남', '하배무',
-          '배황', '배태', '배중', '배임', '배남', '배무',
-          '황', '태', '중', '임', '남', '무', 
-          '청황', '청태', '청중', '청임', '청남', '청협']
+PITCH = [ '하하배임','하배황', '하배태', '하배중', '하배임', '하배이', '하배남', '하배무',
+          '배황', '배태', '배협', '배고', '배중', '배임', '배남', '배무', '배응',
+          '황', '태', '협', '고', '중', '임', '이', '남', '무', 
+          '청황', '청태', '청협', '청고', '청중', '청임', '청남', '청무',
+          '중청황']
 PART = ['daegeum', 'piri', 'haegeum', 'gayageum', 'geomungo', 'ajaeng']
 
 
@@ -104,6 +105,7 @@ class JeongganTokenizer:
         self.key_types = feature_types
         existing_tokens = POSITION + PITCH
         special_token = [token for token in special_token if token not in existing_tokens]
+        self.special_token = special_token
         self.pred_vocab_size = len(existing_tokens+ special_token) + 3 # pad start end
 
         self.vocab = ['pad', 'start', 'end'] + POSITION + PITCH + special_token + PART # + special_token]
