@@ -340,9 +340,8 @@ class JGInferencer(Inferencer):
 
     final_tokens = [start_token]
     if prev_generation is not None:
-      final_tokens, current_measure_idx, encoder_output = self.model._apply_prev_generation(prev_generation, final_tokens, encoder_output)
+      final_tokens, current_gak_idx, encoder_output = self.model._apply_prev_generation(prev_generation, final_tokens, encoder_output)
     selected_token = start_token
-    
 
     total_attention_weights = []
     # while True:
@@ -380,13 +379,13 @@ class JGInferencer(Inferencer):
       attention_map = None
     else:
       attention_map = torch.stack(total_attention_weights, dim=1)
-    if isinstance(self.model, TransSeq2seq): final_tokens = final_tokens[1:]
+    if isinstance(self.model, JeongganTransSeq2seq): final_tokens = final_tokens[1:]
     cat_out = torch.cat(final_tokens, dim=0)
-    if isinstance(self.model, TransSeq2seq) and prev_generation is not None:
+    if isinstance(self.model, JeongganTransSeq2seq) and prev_generation is not None:
       newly_generated = cat_out[len(prev_generation):]
     else:
       newly_generated = cat_out.clone()
-    if prev_generation is not None and not isinstance(self.model, TransSeq2seq):
+    if prev_generation is not None and not isinstance(self.model, JeongganTransSeq2seq):
       cat_out = torch.cat([prev_generation[1:], cat_out], dim=0)
     #  self.converter(src[1:-1]), self.converter(torch.cat(final_tokens, dim=0)), attention_map
 

@@ -24,11 +24,17 @@ def read_txt(path):
     return txt
 
 class JeongganPiece:
-  def __init__(self, txt_fn):
-    self.txt_fn = txt_fn
-    self.name = txt_fn.split('/')[-1].split('_')[0]
-    self.text_str = read_txt(txt_fn)
-    self.inst_list = self.txt_fn[:-4].split('/')[-1].split('_')[1:]
+  def __init__(self, txt_fn, gen_str=None, inst_list=None):
+    if gen_str:
+      assert inst_list, "inst_list should be provided"
+      self.name = 'gen_str'
+      self.text_str = gen_str
+      self.inst_list = inst_list
+    else:
+      self.txt_fn = txt_fn
+      self.name = txt_fn.split('/')[-1].split('_')[0]
+      self.text_str = read_txt(txt_fn)
+      self.inst_list = self.txt_fn[:-4].split('/')[-1].split('_')[1:]
     self.parts, self.part_dict = self.split_to_inst()
     self.check_measure_length()
     self.tokenized_parts = [self.split_and_filter(part) for part in self.parts]
@@ -69,7 +75,7 @@ class JeongganPiece:
     
   def check_measure_length(self):
     self.is_clean = False
-    meausre_length_by_inst = [[measure.count('|') for measure in inst.split('\n')] for inst in self.parts ]
+    meausre_length_by_inst = [[measure.count('|') for measure in inst.split('\n')if len(measure)>2] for inst in self.parts ]
     for sublist in meausre_length_by_inst[1:]:
       if sublist != meausre_length_by_inst[0]:
         return None, None, None # 우조 경풍년, 현악취타 제외!
@@ -169,18 +175,28 @@ class JeongganDataset:
               jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '평조회상 가락덜이', '관악영산회상 염불도드리'],
               feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
               # target_instrument='daegeum',
-              position_tokens=POSITION):
+              position_tokens=POSITION,
+              piece_list:List[JeongganPiece]=None,
+              tokenizer:JeongganTokenizer=None):
     
     self.data_path = data_path
     self.is_valid = is_valid
     self.position_tokens = position_tokens
     
-    texts = glob.glob(str(data_path / '*.txt'))
-    all_pieces = [JeongganPiece(text) for text in texts]
-    self.all_pieces = [x for x in all_pieces if x.is_clean]
-    unique_token = list(set([key for piece in self.all_pieces for key in piece.token_counter.keys() ]))
-    self.tokenizer = JeongganTokenizer(unique_token, feature_types=feature_types)
-    self.vocab = self.tokenizer.vocab
+    if piece_list:
+      self.all_pieces = piece_list
+    else:
+      texts = glob.glob(str(data_path / '*.txt'))
+      all_pieces = [JeongganPiece(text) for text in texts]
+      self.all_pieces = [x for x in all_pieces if x.is_clean]
+    
+    if tokenizer:
+      self.tokenizer = tokenizer
+      self.vocab = tokenizer.vocab
+    else:
+      unique_token = list(set([key for piece in self.all_pieces for key in piece.token_counter.keys() ]))
+      self.tokenizer = JeongganTokenizer(unique_token, feature_types=feature_types)
+      self.vocab = self.tokenizer.vocab
     self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
     
     self.feature_types = feature_types

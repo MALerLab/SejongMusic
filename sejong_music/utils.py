@@ -95,7 +95,7 @@ def apply_tie_but_measure_split(notes: List[music21.note.Note], part_idx) -> Lis
         previous_measure = note.measureNumber
     return tied_notes
 
-def apply_tie(notes: List[music21.note.Note], part_idx) -> List[music21.note.Note]:
+def apply_tie(notes: List[music21.note.Note], part_idx:int) -> List[music21.note.Note]:
     tied_notes = []
     for note in notes:
         if note.tie is not None:
