@@ -45,7 +45,7 @@ class JeongganPiece:
   def split_to_inst(self):
     self.daegeum, self.piri, self.haegeum, self.ajaeng, self.gayageum, self.geomungo = None, None, None, None, None, None
     parts = self.text_str.split('\n\n')
-    parts = [part + ' \n ' for part in parts]
+    parts = [part + ' \n ' if '\n' not in part[-5:] else part for part in parts]
     for i, inst in enumerate(self.inst_list):
       setattr(self, inst, parts[i])
     return parts, {inst: part for inst, part in zip(self.inst_list, parts)}
@@ -93,7 +93,8 @@ class JeongganPiece:
 
   @classmethod
   def cut_part_by_slice_len(self, part:str, slice_len:int):
-    measure_boundary_idx = [0]+ [i+1 for i, cha in enumerate(part) if cha == '\n'] + [len(part)]
+    measure_boundary_idx = [0]+ [i+1 for i, cha in enumerate(part) if cha == '\n']
+    # measure_boundary_idx[10] == 10th measure's start index (count from 0)
     cutted_part = [self.cut(part, measure_boundary_idx, i, i+slice_len) for i in range(len(measure_boundary_idx)-slice_len)]
     return cutted_part
     

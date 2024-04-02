@@ -1,7 +1,7 @@
 import re
 from fractions import Fraction
 from collections import OrderedDict, Counter
-from typing import Any, List, Union
+from typing import Any, List, Union, Tuple
 
 import music21
 from music21 import note as mnote, stream as mstream, meter as mmeter, key as mkey, pitch as mpitch
@@ -11,7 +11,7 @@ from .jg_code import POSITION, PITCH
 
 class JGCodeToOMRDecoder:
   pos_tokens = POSITION
-  ignore_tokens = ('start', 'end', 'pad')
+  ignore_tokens = ('start', 'end', 'pad', '')
   
   one_third_pos = (':1', ':2', ':3')
   two_third_pos = (':4', ':5', ':6')
@@ -55,7 +55,7 @@ class JGCodeToOMRDecoder:
     
     '''
     if jg_token_str == ' ':
-      return '0:5'
+      return '-:5'
     
     
     if ':0' in jg_token_str:
@@ -112,7 +112,7 @@ class JGCodeToOMRDecoder:
     return '|'.join(out)
   
   
-  def __call__(self, tokens:List):
+  def __call__(self, tokens:List[str]):
     assert isinstance(tokens, list)
     if isinstance(tokens[0], list):
       tokens = [x[0] for x in tokens]
@@ -123,6 +123,14 @@ class JGCodeToOMRDecoder:
     # jg_splitted_tokens = re.split('\n|\|', reversed_token_str)
     # return '|'.join([self.convert_jeonggan_to_omr_label(x) for x in jg_splitted_tokens])
     # return jg_splitted_tokens
+    
+  def convert_multi_inst_str(self, multi_inst_str:str):
+    assert isinstance(multi_inst_str, str)
+    parts = multi_inst_str.split('\n\n')
+    outputs = []
+    for part in parts:
+      outputs.append(self(part.split(' ')))
+    return '\n\n'.join(outputs)
 
 
 
@@ -553,7 +561,7 @@ class JGToStaffConverter:
                time_signatures:str='3/8', 
                key_signature:int=-4,
                scale=None,
-               verbose=False):
+               verbose=False) -> Tuple[List[Note], music21.stream.Stream]:
 
     if isinstance(tokens, str):
       tokens = tokens.split(' ')
