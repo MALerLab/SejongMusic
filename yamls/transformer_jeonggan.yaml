@@ -26,6 +26,7 @@ model:
   depth: 4
   num_heads: 4
   dropout: 0.2
+  is_pos_enc: False
 
 train:
   batch_size: 16

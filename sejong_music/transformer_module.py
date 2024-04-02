@@ -92,7 +92,8 @@ class JeongganTransEncoder(nn.Module):
                                         num_heads=self.param.num_heads,
                                         attn_dropout=config.dropout,
                                         ff_dropout = config.dropout,
-                                        attn_flash=True
+                                        attn_flash=True,
+                                        
     )
     self.encoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 2000)
     add_dropout_after_attn(self.layers, self.param.dropout)
@@ -108,7 +109,8 @@ class JeongganTransEncoder(nn.Module):
     '''
     mask = (x != 0)[..., -1] # squeeze num_features dimension
     embedding = self.embedding(x)
-    embedding += self.encoder_pos_enc(embedding)
+    if self.param.is_pos_enc:
+      embedding += self.encoder_pos_enc(embedding)
     return self.layers(embedding, mask=mask), mask
   
 class JeongganTransDecoder(nn.Module):
@@ -134,7 +136,8 @@ class JeongganTransDecoder(nn.Module):
   def forward(self, x, enc_out, src_mask, return_logits=False, cache=None):
     mask = (x != 0)[..., -1]
     embedding = self.embedding(x)
-    embedding += self.decoder_pos_enc(embedding)
+    if self.param.is_pos_enc:
+      embedding += self.decoder_pos_enc(embedding)
     if return_logits:
       output, intermediates = self.layers(embedding, context=enc_out, mask=None, context_mask=src_mask, cache=cache, return_hiddens=True)
       logit = self.proj(output)
