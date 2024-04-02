@@ -45,7 +45,7 @@ def main(config: DictConfig):
   # dataset_class = JeongganDataset
   model_class = getattr(model_zoo, config.model_class)
   
-  train_dataset = JeongganDataset(data_path= Path('/home/danbi/userdata/DANBI/gugakwon/SejongMusic/music_score/gen_code'), 
+  train_dataset = JeongganDataset(data_path= original_wd / 'music_score/gen_code', 
                   # slice_measure_num = 2,
                   is_valid=False,
                   # use_pitch_modification=False,
@@ -56,7 +56,7 @@ def main(config: DictConfig):
                   # target_instrument='daegeum'
                   )
   
-  val_dataset = JeongganDataset(data_path= Path('/home/danbi/userdata/DANBI/gugakwon/SejongMusic/music_score/gen_code'), 
+  val_dataset = JeongganDataset(data_path= original_wd / 'music_score/gen_code', 
                   # slice_measure_num = 2,
                   is_valid=True,
                   # use_pitch_modification=False,
@@ -104,7 +104,7 @@ def main(config: DictConfig):
     model.is_condition_shifted = isinstance(train_dataset, yeominrak_processing.ShiftedAlignedScore)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.lr)
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.9)
-    scheduler = CosineLRScheduler(optimizer, total_steps=config.train.num_epoch * len(train_loader), warmup_steps=500, lr_min_ratio=0.0001, cycle_length=1.0)
+    scheduler = CosineLRScheduler(optimizer, total_steps=config.train.num_epoch * len(train_loader), warmup_steps=1000, lr_min_ratio=0.001, cycle_length=1.0)
     # scheduler = None
     
 

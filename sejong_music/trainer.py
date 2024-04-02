@@ -325,7 +325,8 @@ class Trainer:
     if self.scheduler is not None:
       self.scheduler.step()
     if self.save_log:
-        wandb.log({f"training.loss": loss}, step=self.iteration)
+        wandb.log({f"training.loss": loss, 'lr': self.optimizer.param_groups[0]['lr']}, step=self.iteration)
+
         
     self.iteration += 1
     return loss.item(), loss_dict, attn_weight
