@@ -56,14 +56,14 @@ class JeongganPiece:
       token_counter.update(part)
     return token_counter
     
-  @staticmethod
-  def split_and_filter(string, split_charater=' '):
+  # @staticmethod
+  def split_and_filter(self, string, split_charater=' '):
     splited = string.split(split_charater)
     filtered = [x for x in splited if x != '']
     filtered = self.filter_by_ignore_token(filtered)
     return filtered
   
-  @staticmethod
+  # @staticmethod
   def filter_by_ignore_token(self, splited, ignore_token=['10', '뜰', '2', '3', '흘림표', '추성', '퇴성', '숨표'], position_token=POSITION):
     position_token = [x for x in position_token if x not in ['|', '\n']]
     filtered = []
