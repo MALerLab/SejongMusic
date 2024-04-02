@@ -60,7 +60,30 @@ class JeongganPiece:
   def split_and_filter(string, split_charater=' '):
     splited = string.split(split_charater)
     filtered = [x for x in splited if x != '']
+    filtered = self.filter_by_ignore_token(filtered)
     return filtered
+  
+  @staticmethod
+  def filter_by_ignore_token(self, splited, ignore_token=['10', '뜰', '2', '3', '흘림표', '추성', '퇴성', '숨표'], position_token=POSITION):
+    position_token = [x for x in position_token if x not in ['|', '\n']]
+    filtered = []
+    prev_token = splited[0]
+    for token in splited[::-1]:
+      if token in ignore_token:
+        prev_token = token
+        continue
+      elif prev_token in ignore_token:
+        if token == '-' or token in position_token:
+          continue
+        else: 
+          prev_token = token
+          filtered.append(token)
+      else:
+        prev_token = token
+        filtered.append(token)
+    filtered= filtered[::-1]
+    return filtered
+            
   
   @staticmethod
   def cut(part, measure_boundary_idx, start_mea=0, end_mea=4):
