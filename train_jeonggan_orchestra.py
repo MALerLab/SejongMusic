@@ -17,6 +17,7 @@ from sejong_music.trainer import JeongganTrainer
 from sejong_music.train_utils import CosineLRScheduler
 # from sejong_music.constants import PART, POSITION, PITCH
 from sejong_music.jg_code import JeongganDataset
+from sejong_music.full_inference import Generator
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
@@ -87,9 +88,8 @@ def main(config: DictConfig):
     OmegaConf.save(config, f)
   tokenizer_vocab_path = save_dir / 'tokenizer_vocab.json'
   train_dataset.tokenizer.save_to_json(tokenizer_vocab_path)
-
   
-  repeat = 4
+  repeat = 1
   for target_inst_idx in range(repeat):
     if not isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeqTotal) and isinstance(train_dataset, yeominrak_processing.OrchestraScoreSeq):
       train_dataset.target_instrument = target_inst_idx
@@ -119,11 +119,30 @@ def main(config: DictConfig):
                                 save_log=config.general.make_log, 
                                 save_dir=inst_save_dir, 
                                 scheduler=scheduler)
+    generator = Generator(config=None,
+                          model=model,
+                          output_dir=inst_save_dir,
+                          inferencer=atrainer.inferencer
+                          )
 
     atrainer.iteration = total_iteration
     atrainer.train_by_num_iteration(config.train.num_epoch * len(train_loader))
     atrainer.load_best_model()
+    output_str = generator.inference_from_xml(original_wd / 'music_score/cph_generated.musicxml', ['geomungo', 'gayageum', 'ajaeng', 'haegeum', 'piri', 'daegeum'])
+    
+  
+    with open(inst_save_dir / 'cph_gencode.txt', 'w') as f:
+      f.write(output_str)
+    
+    jg_omr_str = generator.jg_to_omr_converter.convert_multi_inst_str(output_str)
+    with open(inst_save_dir / 'cph_omr.txt', 'w') as f:
+      f.write(jg_omr_str)
+    
+    notes, score = generator.jg_to_staff_converter(output_str)
 
+    score.write('musicxml', inst_save_dir / 'cph_gen.musicxml')
+
+    
     atrainer.make_inference_result(write_png=True)
     total_iteration = atrainer.iteration
 
