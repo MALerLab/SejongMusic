@@ -570,7 +570,6 @@ class JGToStaffConverter:
     scale = self.parse_scale(scale)
     if scale is None:
       scale, exceptional_pitches = self.get_scale(notes)
-      print('scales:', scale)
     if len(scale) < 4:
       self.pitch_converter = SigimsaeConverter()
     else:

@@ -29,8 +29,8 @@ def main(config: DictConfig):
   
   if config.general.make_log:
     wandb.init(
-      project="yeominrak", 
-      entity="danbinaerin", 
+      project=config.general.project, 
+      entity=config.general.entity, 
       name = make_experiment_name_with_date(config), 
       config = OmegaConf.to_container(config),
       dir=Path(hydra.utils.get_original_cwd())

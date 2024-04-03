@@ -222,7 +222,7 @@ class JeongganDataset:
       self.tokenizer = tokenizer
       self.vocab = tokenizer.vocab
     else:
-      unique_token = list(set([key for piece in self.all_pieces for key in piece.token_counter.keys() ]))
+      unique_token = sorted(list(set([key for piece in self.all_pieces for key in piece.token_counter.keys() ])))
       self.tokenizer = JeongganTokenizer(unique_token, feature_types=feature_types)
       self.vocab = self.tokenizer.vocab
     self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]

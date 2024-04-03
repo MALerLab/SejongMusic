@@ -311,12 +311,13 @@ class Trainer:
     loss, _, loss_dict, attn_weight = self.get_loss_from_single_batch(batch)
     
     if self.use_fp16:
-      with torch.cuda.amp.autocast(dtype=torch.float16):
-        self.scaler.scale(loss).backward()
-        self.scaler.unscale_(self.optimizer)
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-        self.scaler.step(self.optimizer)
-        self.scaler.update()
+      # with torch.cuda.amp.autocast(dtype=torch.float16):
+      self.scaler.scale(loss).backward()
+      self.scaler.unscale_(self.optimizer)
+      torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+      self.scaler.step(self.optimizer)
+      self.scaler.update()
+      self.optimizer.zero_grad()
     else:
       loss.backward()
       torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
