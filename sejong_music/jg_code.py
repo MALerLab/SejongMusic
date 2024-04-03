@@ -10,10 +10,11 @@ import torch
 
 
 POSITION = ['|', '\n']+ [f":{i}" for i in range(0, 16)]
-PITCH = [ '하하배임','하배황', '하배태', '하배중', '하배임', '하배남', '하배무',
-          '배황', '배태', '배중', '배임', '배남', '배무',
-          '황', '태', '중', '임', '남', '무', 
-          '청황', '청태', '청중', '청임', '청남', '청협']
+PITCH = [ '하하배임','하배황', '하배태', '하배중', '하배임', '하배이', '하배남', '하배무',
+          '배황', '배태', '배협', '배고', '배중', '배임', '배남', '배무', '배응',
+          '황', '태', '협', '고', '중', '임', '이', '남', '무', 
+          '청황', '청태', '청협', '청고', '청중', '청임', '청남', '청무',
+          '중청황']
 PART = ['daegeum', 'piri', 'haegeum', 'gayageum', 'geomungo', 'ajaeng']
 
 
@@ -55,11 +56,34 @@ class JeongganPiece:
       token_counter.update(part)
     return token_counter
     
-  @staticmethod
-  def split_and_filter(string, split_charater=' '):
+  # @staticmethod
+  def split_and_filter(self, string, split_charater=' '):
     splited = string.split(split_charater)
     filtered = [x for x in splited if x != '']
+    filtered = self.filter_by_ignore_token(filtered)
     return filtered
+  
+  # @staticmethod
+  def filter_by_ignore_token(self, splited, ignore_token=['10', '뜰', '2', '3', '흘림표', '추성', '퇴성', '숨표'], position_token=POSITION):
+    position_token = [x for x in position_token if x not in ['|', '\n']]
+    filtered = []
+    prev_token = splited[0]
+    for token in splited[::-1]:
+      if token in ignore_token:
+        prev_token = token
+        continue
+      elif prev_token in ignore_token:
+        if token == '-' or token in position_token:
+          continue
+        else: 
+          prev_token = token
+          filtered.append(token)
+      else:
+        prev_token = token
+        filtered.append(token)
+    filtered= filtered[::-1]
+    return filtered
+            
   
   @staticmethod
   def cut(part, measure_boundary_idx, start_mea=0, end_mea=4):
@@ -112,6 +136,7 @@ class JeongganTokenizer:
         self.key_types = feature_types
         existing_tokens = POSITION + PITCH
         special_token = [token for token in special_token if token not in existing_tokens]
+        self.special_token = special_token
         self.pred_vocab_size = len(existing_tokens+ special_token) + 3 # pad start end
 
         self.vocab = ['pad', 'start', 'end'] + POSITION + PITCH + special_token + PART # + special_token]
