@@ -142,9 +142,7 @@ class Inferencer:
   
   def _apply_softmax(self, logit):
     pitch_output = torch.softmax(logit[...,:self.vocab_size[1]], dim=-1)
-    # print(logit.shape)
     dur_output = torch.softmax(logit[...,self.vocab_size[1] :], dim=-1)
-    # print(f"{pitch_output.shape, dur_output.shape}!!")
     return torch.cat([pitch_output, dur_output], dim=-1) 
 
   def sampling_process(self, logit):
