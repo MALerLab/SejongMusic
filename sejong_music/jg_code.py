@@ -203,11 +203,13 @@ class JeongganDataset:
               # target_instrument='daegeum',
               position_tokens=POSITION,
               piece_list:List[JeongganPiece]=None,
-              tokenizer:JeongganTokenizer=None):
+              tokenizer:JeongganTokenizer=None, 
+              is_pos_counter=True):
     
     self.data_path = data_path
     self.is_valid = is_valid
     self.position_tokens = position_tokens
+    self.is_pos_counter = is_pos_counter
     
     if piece_list:
       self.all_pieces = piece_list
@@ -225,7 +227,10 @@ class JeongganDataset:
       self.vocab = self.tokenizer.vocab
     self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
     
-    self.feature_types = feature_types
+    if self.is_pos_counter:
+      self.feature_types = feature_types[0]+feature_types[-1]
+    else:
+      self.feature_types = feature_types
     # self.target_instrument = target_instrument
     # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
 
@@ -256,15 +261,19 @@ class JeongganDataset:
     current_jg_idx = 0
     current_gak_idx = 0
     for token in tokens:
-      expanded_token = self.make_compound_word_in_order(token, inst, prev_position_token, current_jg_idx, current_gak_idx)
-      if token in self.position_tokens:
-        prev_position_token = token 
-      if token == '|':
-        current_jg_idx += 1
-      elif token == '\n':
-        current_gak_idx += 1
-        current_jg_idx = 0
-      new_tokens.append(expanded_token)
+      if self.is_pos_counter:
+        expanded_token = self.make_compound_word_in_order(token, inst, prev_position_token, current_jg_idx, current_gak_idx)
+        if token in self.position_tokens:
+          prev_position_token = token 
+        if token == '|':
+          current_jg_idx += 1
+        elif token == '\n':
+          current_gak_idx += 1
+          current_jg_idx = 0
+        new_tokens.append(expanded_token)
+      else: 
+        expanded_token = [token, inst]
+        new_tokens.append(expanded_token)
     return new_tokens  
   
 
