@@ -144,7 +144,7 @@ class JeongganTransDecoder(nn.Module):
       return logit, intermediates
     output = self.layers(embedding, context=enc_out, mask=mask, context_mask=src_mask)
     logit = self.proj(output)
-    dec_out = self._apply_softmax(logit)
+    dec_out = self._apply_log_softmax(logit)
     return dec_out
   
   def _make_projection_layer(self):
@@ -153,6 +153,9 @@ class JeongganTransDecoder(nn.Module):
 
   def _apply_softmax(self, logit):
     return torch.softmax(logit, dim=-1)
+
+  def _apply_log_softmax(self, logit):
+    return torch.log_softmax(logit, dim=-1)
   
   def _select_token(self, prob: torch.Tensor):
     tokens = []
