@@ -8,12 +8,11 @@ general:
 inference_dir: inference_img/
 param_yaml: 'yeominrak_feature_ratio.yaml'
 
-dataset_class: JeongganDataset
-model_class: JeongganTransSeq2seq
-loss_fn: nll_loss_transformer_with_logsoftmax
+dataset_class: JGMaskedDataset
+model_class: JeongganBERT
+loss_fn: nll_loss_bert
 collate_fn: pad_collate_transformer
-trainer_class: JeongganTrainer
-
+trainer_class: BertTrainer
 
 
 data:
@@ -39,4 +38,12 @@ train:
   num_workers: 8
   lr: 1e-3
 
+aug:
+  entire_orn_r: 0.3
+  jg_r: 0.15
+  frame_replace_r: 0.05
+  frame_rand_r: 0.05
+  mask_note_r: 0.15
+  replace_note_r: 0.05
+  erase_note_r: 0.05
 

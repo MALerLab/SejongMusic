@@ -508,7 +508,20 @@ class OrchestraTrainer(Trainer):
 
 
 class JeongganTrainer(Trainer):
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None, clip_grad_norm=1, use_fp16=True):
+  def __init__(self, 
+               model, 
+               optimizer, 
+               loss_fn, 
+               train_loader, 
+               valid_loader, 
+               device, 
+               save_dir, 
+               save_log=True, 
+               scheduler=None, 
+               clip_grad_norm=1,
+               epoch_per_infer=50,
+               min_epoch_for_infer=5,
+               use_fp16=True):
     super().__init__(model, 
                      optimizer, 
                      loss_fn, 
@@ -519,8 +532,8 @@ class JeongganTrainer(Trainer):
                      save_log, 
                      scheduler, 
                      clip_grad_norm,
-                     epoch_per_infer=50,
-                     min_epoch_for_infer=5,
+                     epoch_per_infer=epoch_per_infer,
+                     min_epoch_for_infer=min_epoch_for_infer,
                      use_fp16=use_fp16)
     self.inferencer = JGInferencer(model, True, True, 1.0, 0.9)
     self.decoder = JGToStaffConverter(dur_ratio=1.5)
@@ -630,3 +643,66 @@ class JeongganTrainer(Trainer):
       '''
     return 0, 0, 0
 
+class BertTrainer(JeongganTrainer):
+  def __init__(self, 
+               model, 
+               optimizer, 
+               loss_fn, 
+               train_loader, 
+               valid_loader, 
+               device, 
+               save_dir, 
+               save_log=True, 
+               scheduler=None, 
+               clip_grad_norm=1,
+               epoch_per_infer=50,
+               min_epoch_for_infer=5,
+               use_fp16=True):
+    super().__init__(model, 
+                     optimizer, 
+                     loss_fn, 
+                     train_loader, 
+                     valid_loader, 
+                     device, 
+                     save_dir, 
+                     save_log, 
+                     scheduler, 
+                     clip_grad_norm,
+                     epoch_per_infer=epoch_per_infer,
+                     min_epoch_for_infer=min_epoch_for_infer,
+                     use_fp16=use_fp16)
+
+    
+  
+  
+  def get_loss_from_single_batch(self, batch):
+    src, org_src, loss_mask = batch
+    src, org_src, loss_mask = src.to(self.device), org_src.to(self.device), loss_mask.to(self.device)
+    if self.use_fp16:
+      with torch.cuda.amp.autocast():
+        pred, attn_weight = self.model(src)
+        loss = self.loss_fn(pred, org_src, loss_mask)
+    else:
+      pred, attn_weight = self.model(src)
+      loss = self.loss_fn(pred, org_src, loss_mask)
+
+    loss_dict = {'total_loss': loss.item()}
+    return loss, pred, loss_dict, attn_weight
+
+
+  def get_valid_loss_from_single_batch(self, batch):
+    src, org_src, loss_mask = batch
+    loss, pred, loss_dict, attention_weight = self.get_loss_from_single_batch(batch)
+    
+    pred_class = torch.argmax(pred, dim=-1)
+    org_src, loss_mask = org_src[...,:2].to(self.device), loss_mask.to(self.device)
+    num_tokens = loss_mask.sum()
+    acc = ((pred_class == org_src) * loss_mask).sum() / num_tokens
+    acc = acc.item()
+
+    validation_loss = loss.item()
+
+    loss_dict['main_acc'] = acc
+        
+    return acc, acc, acc, validation_loss, num_tokens, loss_dict
+  

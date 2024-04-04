@@ -906,6 +906,37 @@ class JeongganTransSeq2seq(Seq2seq):
 
 
 
+class JeongganBERT(nn.Module):
+  def __init__(self, tokenizer, config):
+    super().__init__()
+    self.tokenizer = tokenizer
+    self.converter = tokenizer
+    self.vocab_size = len(tokenizer.vocab)
+    self.pred_vocab_size = tokenizer.pred_vocab_size
+    self.config = config
+
+    self.encoder = JeongganTransEncoder(self.vocab_size, self.config)
+    self.proj = nn.Linear(config.dim, self.pred_vocab_size * 2)
+    self.pred_vocab_size = self.pred_vocab_size
+    self.is_condition_shifted = False
+    
+  
+  def forward(self, src:torch.Tensor):
+    enc_out, _ = self.encoder(src)
+    logit = self.proj(enc_out)
+    return logit.reshape(logit.shape[0], logit.shape[1], 2, self.pred_vocab_size), None
+  
+  def _run_inference_on_step(self, final_tokens, encoder_output):
+    enc_out, enc_mask = encoder_output['encode_out'], encoder_output['enc_mask']
+    kv_cache = encoder_output['kv_cache']
+    # logit, _ = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    logit, encoder_output['kv_cache'] = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True, cache=kv_cache)
+    return logit[:, -1:], encoder_output, torch.zeros_like(enc_out) # TODO: Return attention weights
+
+  def run_encoder(self, src):
+    assert src.ndim == 2
+    enc_out, enc_mask = self.encoder(src.unsqueeze(0))
+    return {"encode_out": enc_out, "enc_mask": enc_mask, 'kv_cache': None}
 
 
 
