@@ -337,7 +337,3 @@ class JeongganDataset:
     src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)          
     return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
 
-if __name__ == '__main__':
-  dataset = JeongganDataset(is_pos_counter=False)
-  print(len(dataset))
-  print(dataset[0])

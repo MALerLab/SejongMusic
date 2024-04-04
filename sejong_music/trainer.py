@@ -508,7 +508,7 @@ class OrchestraTrainer(Trainer):
 
 
 class JeongganTrainer(Trainer):
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None, clip_grad_norm=1, use_fp16=True, is_pos_enc=False):
+  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None, clip_grad_norm=1, use_fp16=True, is_pos_counter=False):
     super().__init__(model, 
                      optimizer, 
                      loss_fn, 
@@ -522,10 +522,10 @@ class JeongganTrainer(Trainer):
                      epoch_per_infer=50,
                      min_epoch_for_infer=5,
                      use_fp16=use_fp16)
-    if is_pos_enc:
-      self.inferencer = JGSimpleInferencer(model, True, True, 1.0, 0.9)
-    else:  
+    if is_pos_counter:
       self.inferencer = JGInferencer(model, True, True, 1.0, 0.9)
+    else:  
+      self.inferencer = JGSimpleInferencer(model, True, True, 1.0, 0.9)
     self.decoder = JGToStaffConverter(dur_ratio=1.5)
     
   
@@ -596,7 +596,7 @@ class JeongganTrainer(Trainer):
         print(f"Error occured in inference result: {e}")
         print(src)
         print(output)
-        print([note[2] for note in output])
+        # print([note[2] for note in output])
         is_match = False
 
       # if self.model.is_condition_shifted:
