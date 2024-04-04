@@ -9,9 +9,16 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence, pack_padded_sequence
 
-from .constants import get_dynamic, MEAS_LEN_BY_IDX
+from .constants import get_dynamic, MEAS_LEN_BY_IDX, get_dynamic_template_for_orch
 from .yeominrak_processing import Tokenizer
-from .metric import convert_dynamics_to_integer, make_dynamic_template
+from .utils import convert_dynamics_to_integer, make_dynamic_template
+from .module import PackedDropout, MultiEmbedding, get_emb_total_size, Converter
+from .sampling_utils import nucleus
+from .transformer_module import TransEncoder, TransDecoder, JeongganTransEncoder, JeongganTransDecoder
+from .model_layers import Encoder, Decoder, AttnDecoder, QkvAttnDecoder, QkvAttnDecoderMore, EncoderWithDropout, get_attention_vector
+import x_transformers
+from x_transformers.x_transformers import AbsolutePositionalEmbedding
+
 
 
 def read_yaml(yml_path):
@@ -19,111 +26,6 @@ def read_yaml(yml_path):
         yaml_obj = yaml.load(f, Loader=yaml.FullLoader)
     config = OmegaConf.create(yaml_obj)
     return config
-
-def get_emb_total_size(config):
-  emb_param = config.model.emb
-  config.model.features = list(config.model.emb.keys())[1:-1]
-  total_size = 0 
-  for key in config.model.features:
-    size = int(emb_param[key] * emb_param.emb_size)
-    total_size += size
-    emb_param[key] = size
-  emb_param.total_size = total_size
-  # emb_param.measure_starting_point = emb_param['pitch']+emb_param['duration']
-  # emb_param.beat_starting_point = emb_param['pitch']+emb_param['duration']+emb_param['measure']
-  config.model.emb = emb_param
-  return config
-
-class MultiEmbedding(nn.Module):
-  def __init__(self, vocab_sizes: dict, vocab_param) -> None:
-    super().__init__()
-    self.layers = []
-    embedding_sizes = self.get_embedding_size(vocab_sizes, vocab_param)
-    # if isinstance(embedding_sizes, int):
-    #   embedding_sizes = [embedding_sizes] * len(vocab_sizes)
-    # print(embedding_sizes)
-    for vocab_size, embedding_size in zip(vocab_sizes.values(), embedding_sizes):
-      if embedding_size != 0:
-        self.layers.append(nn.Embedding(vocab_size, embedding_size))
-    self.layers = nn.ModuleList(self.layers)
-
-  def forward(self, x):
-    # num_embeddings = torch.tensor([x.num_embeddings for x in self.layers])
-    # max_indices = torch.max(x, dim=0)[0].cpu()
-    # assert (num_embeddings > max_indices).all(), f'num_embeddings: {num_embeddings}, max_indices: {max_indices}'
-    return torch.cat([module(x[..., i]) for i, module in enumerate(self.layers)], dim=-1)
-
-  def get_embedding_size(self, vocab_sizes, vocab_param):
-    embedding_sizes = [getattr(vocab_param, vocab_key) for vocab_key in vocab_sizes.keys()]
-    return embedding_sizes
-  
-  @property
-  def total_size(self):
-    return sum([layer.embedding_dim for layer in self.layers])
-  
-# def get_measure_duration(source, vocab):
-#   measure_set = defaultdict(list)
-#   for i in range(1, len(source)-1):
-#     measure = source[i, 2].item()
-#     measure_set[measure].append(vocab.vocab['duration'][source[i, 1].item()])
-#   sum_value = [sum(value) for value in measure_set.values()]
-#   return max(sum_value)
-
-def get_measure_duration(part_idx, vocab):
-  measure_duration_list = [4.0, 8.0, ]
-  return max(sum_value)
-
-class Converter:
-  def __init__(self, tokenizer:Tokenizer):
-    self.tokenizer = tokenizer
-    
-  def _convert_note(self, note:List[int]):
-    key_types = self.tokenizer.key_types[:len(note)]
-    return [self.tokenizer.vocab[key][note[i]] for i, key in enumerate(key_types)]
-
-    # return [int(note[0]), self.vocab['pitch'][note[1]], self.vocab['duration'][note[2]], self.vocab['offset'][note[3]], self.vocab['dynamic'][note[4]], self.vocab['measure_change'][note[5]]]
-
-  def __call__(self, output):
-    # print(output) # tensor([[7, 6, 6, 3, 3]])
-
-    return [self._convert_note(note) for note in output]
-  
-class RollConverter(Converter):
-  def __init__(self, tokenizer:Tokenizer, sampling_rate=2):
-    super().__init__(tokenizer)
-    self.sampling_rate = sampling_rate
-
-  def convert_to_note_event(self, frame_list):
-    note_list = []
-    prev_pitch = 0
-    note_duration = 0
-    part_idx = frame_list[0][0]
-    for frame in frame_list:
-      _, pitch = frame
-      if pitch == 0:
-        note_duration += 1
-        continue
-      else:
-        if prev_pitch != 0:
-          note_list.append([part_idx, prev_pitch, note_duration / self.sampling_rate])
-        prev_pitch = pitch
-        note_duration = 1
-    if prev_pitch != 0:
-      note_list.append([part_idx, prev_pitch, note_duration / self.sampling_rate])
-    return note_list
-  
-  def __call__(self, output): #[pitch, in_onset]
-    converted = [self._convert_note(note) for note in output]
-    converted = self.convert_to_note_event(converted)
-    return converted
-
-# class RollConverter:
-#   def __init__(self, vocab):
-#     self.vocab = vocab 
-  
-#   def __call__(self, output): #[pitch, in_onset]
-#     return [[int(note[0]), self.vocab['pitch'][int(note[1])], int(note[2])] for note in output]
-
 
 #================ model =================
 
@@ -133,11 +35,14 @@ class Seq2seq(nn.Module):
     self.tokenizer = tokenizer
     self.vocab_size_dict = self.tokenizer.vocab_size_dict
     self.config = config
-    self.encoder = Encoder(self.vocab_size_dict, self.config)
-    self.decoder = Decoder(self.vocab_size_dict, self.config)
+    self._make_encoder_and_decoder()
     self.vocab_size = [x for x in self.vocab_size_dict.values()] # {'index': 8, 'pitch': 17, 'duration': 15, 'offset': 62, 'dynamic': 6}
     self.converter = Converter(self.tokenizer)
     self.is_condition_shifted = False
+
+  def _make_encoder_and_decoder(self):
+    self.encoder = Encoder(self.vocab_size_dict, self.config)
+    self.decoder = Decoder(self.vocab_size_dict, self.config)
 
   def forward(self, src, tgt):
     enc_out, enc_last_hidden = self.encoder(src) # enc_last_hidden : [num_layers * num_directions, batch, hidden_size]
@@ -155,7 +60,13 @@ class Seq2seq(nn.Module):
     
     if self.is_condition_shifted:
       if 'offset' in self.vocab_size_dict:
-        token_features.append(self.tokenizer.tok2idx['offset'][0])
+        token_features.append(self.tokenizer.tok2idx['offset'][0]) 
+      if 'daegang_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['daegang_offset'][0])
+      if 'jeonggan_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['jeonggan_offset'][0])
+      if 'beat_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['beat_offset'][0])  
       if 'dynamic' in self.vocab_size_dict:
         token_features.append(self.tokenizer.tok2idx['dynamic']['strong'])
       if 'measure_change' in self.vocab_size_dict:
@@ -166,6 +77,12 @@ class Seq2seq(nn.Module):
     
     if 'offset' in self.vocab_size_dict:
       token_features.append(self.tokenizer.tok2idx['offset']['start'])
+    if 'daegang_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['daegang_offset']['start'])
+    if 'jeonggan_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['jeonggan_offset']['start'])
+    if 'beat_offset' in self.vocab_size_dict:
+        token_features.append(self.tokenizer.tok2idx['beat_offset']['start'])  
     if 'dynamic' in self.vocab_size_dict:
       token_features.append(self.tokenizer.tok2idx['dynamic']['start'])
     if 'measure_change' in self.vocab_size_dict:
@@ -180,6 +97,8 @@ class Seq2seq(nn.Module):
     if 'offset' in self.tokenizer.tok2idx:
       if isinstance(current_beat, float):
         current_beat = Fraction(current_beat).limit_denominator(3)
+      elif isinstance(current_beat, Fraction):
+        current_beat = current_beat.limit_denominator(3)
       if isinstance(current_beat, Fraction) and current_beat.denominator == 3:
         measure_offset_idx = self.tokenizer.tok2idx['offset_fraction'][current_beat]
       else:
@@ -210,19 +129,14 @@ class Seq2seq(nn.Module):
       condition_features.append(measure_start_idx)
     return condition_features
 
-  def update_condition_info(self, current_beat, current_measure_idx, measure_duration, current_dur):
-    if current_dur in ('start', 'pad'):
-      current_dur = 0.0
-    current_beat += Fraction(current_dur).limit_denominator(3)
-    if float(current_beat) + 0.1 >= measure_duration:
-      current_measure_idx += 1 #마디 수 늘려주기
-      measure_changed = 1
-      current_beat = current_beat - measure_duration
-    else:
-      measure_changed = 0
 
-    return current_beat, current_measure_idx, measure_changed
-
+  
+  def _get_measure_duration(self, part_idx):
+    return self.tokenizer.measure_duration[part_idx]
+  
+  def _decode_inference_result(self, src, output, other_out):
+    return self.converter(src[1:-1]), self.converter(output), other_out
+  
   @torch.inference_mode()
   def inference(self, src, part_idx):
     enc_output, enc_last_hidden = self.encoder(src)
@@ -265,130 +179,26 @@ class Seq2seq(nn.Module):
   
       # prob = PackedSequence(prob, x[1], x[2], x[3])
 
-class Encoder(nn.Module):
-  def __init__(self, vocab_size_dict: dict, config):
-    super().__init__()
-    self.param = config
-    self.vocab_size = [x for x in vocab_size_dict.values()]
-    self.vocab_size_dict = vocab_size_dict
-    self._make_embedding_layer()
-    self.rnn = nn.GRU(self.param.emb.total_size, self.param.gru.hidden_size, num_layers=self.param.gru.num_layers, batch_first=True, bidirectional=True, dropout=0.2)
-    self.hidden_size = self.param.gru.hidden_size
-    self.num_layers = self.param.gru.num_layers
-    self.return_reduced_bidirectional = True
-    
-  def _make_embedding_layer(self):
-    # self.emb = nn.Embedding(num_embeddings=self.vocab_size, embedding_dim=self.net_param.nn_params.emb.emb_size)
-    self.emb = MultiEmbedding(self.vocab_size_dict, self.param.emb)
-    
-  def _get_embedding(self, input_seq):
-    if isinstance(input_seq, PackedSequence):
-      emb = PackedSequence(self.emb(input_seq[0]), input_seq[1], input_seq[2], input_seq[3])
-    else:
- 
-      emb = self.emb(input_seq)
-    return emb
 
-  def forward(self, input_seq):
 
-    emb = self._get_embedding(input_seq)
-    out, last_hidden = self.rnn(emb)
-      
-    if self.rnn.bidirectional and self.return_reduced_bidirectional:
-      last_hidden = last_hidden.view(self.num_layers, 2, -1, self.hidden_size)
-      last_hidden = last_hidden.mean(dim=1)
-      
-      if isinstance(out, PackedSequence):
-        out = PackedSequence(out.data.view(out.data.shape[0], 2, -1).mean(dim=1), out[1], out[2], out[3])
-      else:
-        out = out.view(out.shape[0], out.shape[1], 2, -1).mean(dim=2)
-    return out, last_hidden
-
-class Decoder(nn.Module):
-  def __init__(self, vocab_size_dict: dict, param):
-    super().__init__()
-    self.param = param
-    self.vocab_size = [x for x in vocab_size_dict.values()] 
-    self.vocab_size_dict = vocab_size_dict
-    self._make_embedding_layer()
-    self.rnn = nn.GRU(self.param.emb.total_size, self.param.gru.hidden_size, num_layers=self.param.gru.num_layers, batch_first=True)
-    self.hidden_size = self.param.gru.hidden_size
-    self.num_layers = self.param.gru.num_layers
-    self._make_projection_layer()
-  
-  def _make_embedding_layer(self):
-    # self.emb = nn.Embedding(num_embeddings=self.vocab_size, embedding_dim=self.net_param.nn_params.emb.emb_size)
-    self.emb = MultiEmbedding(self.vocab_size_dict, self.param.emb)
-    
-  def _make_projection_layer(self):
-    # total_vocab_size = sum([x for x in self.vocab_size_dict.values()])
-    self.proj = nn.Linear(self.hidden_size, self.vocab_size[1] + self.vocab_size[2])
-  
-  def _get_embedding(self, input_seq):
-    if isinstance(input_seq, PackedSequence):
-      emb = PackedSequence(self.emb(input_seq[0]), input_seq[1], input_seq[2], input_seq[3])
-    else:
-      emb = self.emb(input_seq)
-    return emb
-  
-  def _apply_softmax(self, logit):
-    pitch_output = torch.softmax(logit[...,:self.vocab_size[1]], dim=-1)
-    # print(logit.shape)
-    dur_output = torch.softmax(logit[...,self.vocab_size[1] :], dim=-1)
-    # print(f"{pitch_output.shape, dur_output.shape}!!")
-    return torch.cat([pitch_output, dur_output], dim=1)
-    
-  def forward(self, x, enc_output):
-    if isinstance(x, PackedSequence):
-      emb = self._get_embedding(x)
-      out, _ = self.rnn(emb, enc_output)
-      # out = pad_packed_sequence(out, batch_first=True)[0]
-      logit = self.proj(out.data)
-      prob = self._apply_softmax(logit)
-      prob = PackedSequence(prob, x[1], x[2], x[3])
-    return prob
-  
-  def _select_token(self, prob):
-    tokens = []
-    pitch_token = prob.data[:, :self.vocab_size[1]].multinomial(num_samples=1)
-    dur_token = prob.data[:, self.vocab_size[1]:].multinomial(num_samples=1)
-    # dur_token = torch.argmax(prob.data[:, model.vocab_size[0]:], dim=-1)
-    return torch.cat([pitch_token, dur_token], dim=-1)
-  
-  def forward_one_step(self, x, last_hidden, not_triplet_vocab_list): # 처음에는 encoder_output = last_hidden
-    emb = self._get_embedding(x)
-    # print(emb.shape, last_hidden.shape)
-    out, last_hidden = self.rnn(emb, last_hidden)
-    logit = self.proj(out.data)
-    not_triplet_vocab_list = [i+self.vocab_size[1] for i in not_triplet_vocab_list]
-    logit[:, not_triplet_vocab_list] = -1e10
-    prob = self._apply_softmax(logit)
-    selected_token = self._select_token(prob)
-    return selected_token, last_hidden
-      
-  
-  #----------
-  
-  
-  
-  
-  
-  
 # ---------------Attention --------------#
 
 
 class AttentionSeq2seq(Seq2seq):
   def __init__(self, vocab, config):
-    super().__init__(vocab, config)
-    self.decoder = AttnDecoder(self.vocab_size_dict, self.config)    
-
+    super().__init__(vocab, config)    
+    
+  def _make_encoder_and_decoder(self):
+    self.decoder = AttnDecoder(self.vocab_size_dict, self.config)
+    
   def forward(self, src, tgt):
     enc_out, enc_last_hidden = self.encoder(src)
     dec_out = self.decoder(src, tgt, enc_out, enc_last_hidden)
-     
+  
     return dec_out  
 
 
+  
   def inference(self, src, part_idx):
     with torch.inference_mode():
       
@@ -466,132 +276,42 @@ class AttentionSeq2seq(Seq2seq):
       #   final_tokens.append(selected_token)
     return self.converter(src[1:-1]), self.converter(torch.cat(final_tokens, dim=0)), attention_map
 
-class AttnDecoder(nn.Module):
-  def __init__(self, vocab_size_dict: dict, param):
-    super().__init__()
-    self.param = param
-    self.vocab_size = [x for x in vocab_size_dict.values()] 
-    self.vocab_size_dict = vocab_size_dict
-    self._make_embedding_layer()
-    self.rnn = nn.GRU(self.param.emb.total_size, self.param.gru.hidden_size, num_layers=self.param.gru.num_layers, batch_first=True)
-    self.hidden_size = self.param.gru.hidden_size
-    self.num_layers = self.param.gru.num_layers
-    self._make_projection_layer()
-  
-  def _make_embedding_layer(self):
-    # self.emb = nn.Embedding(num_embeddings=self.vocab_size, embedding_dim=self.net_param.nn_params.emb.emb_size)
-    self.emb = MultiEmbedding(self.vocab_size_dict, self.param.emb)
-    
-  def _make_projection_layer(self):
-    # total_vocab_size = sum([x for x in self.vocab_size_dict.values()])
-    # self.proj = nn.Linear(self.hidden_size, self.vocab_size[1] + self.vocab_size[2])
-    self.proj = nn.Linear(self.hidden_size*2, self.vocab_size[1] + self.vocab_size[2])
 
-  def _get_embedding(self, input_seq):
-    if isinstance(input_seq, PackedSequence):
-      emb = PackedSequence(self.emb(input_seq[0]), input_seq[1], input_seq[2], input_seq[3])
-    else:
-      emb = self.emb(input_seq)
-    return emb
-  
-  def _apply_softmax(self, logit):
-    pitch_output = torch.softmax(logit[...,:self.vocab_size[1]], dim=-1)
-    # print(logit.shape)
-    dur_output = torch.softmax(logit[...,self.vocab_size[1] :], dim=-1)
-    # print(f"{pitch_output.shape, dur_output.shape}!!")
-    return torch.cat([pitch_output, dur_output], dim=-1) 
-  
-  def run_decoder(self, x, enc_output):
-    if isinstance(x, PackedSequence):
-      emb = self._get_embedding(x)
-      out, last_hidden = self.rnn(emb, enc_output)
-    return out, last_hidden
-
-  def forward(self, src, tgt, enc_hidden_state_by_t, enc_out):
-    dec_hidden_state_by_t, dec_out = self.run_decoder(tgt, enc_out)
-
-    mask = pad_packed_sequence(src, batch_first=True)[0][... , 1:2] != 0
-    # print(mask.shape)
-    encoder_hidden_states, source_lens = pad_packed_sequence(enc_hidden_state_by_t, batch_first=True)
-    decoder_hidden_states, target_lens = pad_packed_sequence(dec_hidden_state_by_t, batch_first=True)
-    # print(encoder_hidden_states.shape, decoder_hidden_states.shape) # [N, Ts, C], [N, Tt, C] => [N, Ts, Tt]
-    # torch.Size([64, 80, 128]) torch.Size([64, 79, 128])
-    
-    attention_score = torch.bmm(encoder_hidden_states, decoder_hidden_states.transpose(1, 2))
-    attention_score = attention_score.masked_fill(mask == 0, -float("inf"))
-    attention_weight = torch.softmax(attention_score, dim=1)
-    attention_vec = torch.bmm(attention_weight.transpose(1, 2), encoder_hidden_states)
-    
-    
-    # attention_weight, attention_vec = get_attention_vector(encoder_hidden_states, decoder_hidden_states, mask)
-    
-    dec_output = torch.cat([decoder_hidden_states, attention_vec], dim=-1)
-    # print('pass')
-    logit = self.proj(dec_output)
-    
-    prob = self._apply_softmax(logit)
-    prob = pack_padded_sequence(prob, target_lens, batch_first=True, enforce_sorted=False)
-    # prob = PackedSequence(prob, tgt[1], tgt[2], tgt[3])
-    return prob, attention_weight
-
-  # def forward(self, x, enc_output):
-  #   if isinstance(x, PackedSequence):
-  #     out, _ = self.run_decoder(x, enc_output)
-  #     # out = pad_packed_sequence(out, batch_first=True)[0]
-  #     logit = self.proj(out.data)
-  #     prob = self._apply_softmax(logit)
-  #     prob = PackedSequence(prob, x[1], x[2], x[3])
-  #   return prob
-  
-  def _select_token(self, prob: torch.Tensor):
-    tokens = []
-    # print(prob.shape)
-    pitch_token = prob[0, :, :self.vocab_size[1]].multinomial(num_samples=1)
-    dur_token = prob[0, :, self.vocab_size[1]:].multinomial(num_samples=1)
-    # dur_token = torch.argmax(prob.data[:, model.vocab_size[0]:], dim=-1)
-    return torch.cat([pitch_token, dur_token], dim=-1)
-  
-  def sampling_process(self, out, not_triplet_vocab_list=None): # 처음에는 encoder_output = last_hidden
-    # out : 3차원 tensor
-    logit = self.proj(out) 
-    # print(logit.shape)
-    if not_triplet_vocab_list != None:
-      # print(f'model.py line 247: logit.shape={logit.shape}, vocab_size={self.vocab_size}')
-      not_triplet_vocab_list = [i+self.vocab_size[1] for i in not_triplet_vocab_list]
-      logit[..., not_triplet_vocab_list] = -1e10
-      
-    prob = self._apply_softmax(logit)
-    selected_token = self._select_token(prob)
-    return selected_token
-    
-
-  
-def get_attention_vector(encoder_hidden_states, decoder_hidden_states, mask=None):
-  
-  is_packed = isinstance(encoder_hidden_states, PackedSequence)
-  if is_packed:
-    encoder_hidden_states, source_lens = pad_packed_sequence(encoder_hidden_states, batch_first=True)
-    decoder_hidden_states, target_lens = pad_packed_sequence(decoder_hidden_states, batch_first=True)
-  
-  attention_score = torch.bmm(encoder_hidden_states, decoder_hidden_states.transpose(1, 2))
-  if mask is not None:
-    attention_score = attention_score.masked_fill(mask == 0, -float("inf"))
-  attention_weight = torch.softmax(attention_score, dim=1)
-  attention_vectors = torch.bmm(attention_weight.transpose(1, 2), encoder_hidden_states)
-  
-  if is_packed:
-    attention_vectors = pack_padded_sequence(attention_vectors, target_lens, batch_first=True, enforce_sorted=False)
-    
-  return attention_vectors, attention_weight 
 
 
 class QkvAttnSeq2seq(AttentionSeq2seq):
   def __init__(self, vocab, config):
     super().__init__(vocab, config)
-    self.decoder = QkvAttnDecoder(self.vocab_size_dict, self.config)  
+    self._make_encoder_and_decoder()
   
-  def _decode_inference_result(self, src, output, other_out):
-    return self.converter(src[1:-1]), self.converter(output), other_out
+  def _make_encoder_and_decoder(self):
+    self.decoder = QkvAttnDecoder(self.vocab_size_dict, self.config)  
+
+  def _run_inference_on_step(self, emb, last_hidden, encode_out):
+    decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+    attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+    combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+    logit = self.decoder.proj(combined_value)
+    return logit, last_hidden , attention_weight
+
+  def run_encoder(self, src):
+    encode_out, encode_last_hidden = self.encoder(src.unsqueeze(0)) # 
+    last_hidden = encode_last_hidden
+    if last_hidden.shape[-1] != self.decoder.gru_size:
+      last_hidden = self.decoder.reduce_enc(last_hidden)   
+    return {"encode_out": encode_out, "last_hidden": last_hidden} 
+
+  def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output:dict):
+    emb = self.decoder._get_embedding(prev_generation)
+    _, encoder_output["last_hidden"] = self.decoder.rnn(emb.unsqueeze(0), encoder_output["last_hidden"])
+    dev = emb.device
+    start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
+    final_tokens.append(start_token)
+    current_measure_idx = 2
+
+    return final_tokens, current_measure_idx, encoder_output
+  
+
 
   @torch.inference_mode()
   def inference(self, src, part_idx):
@@ -647,7 +367,7 @@ class QkvAttnSeq2seq(AttentionSeq2seq):
     return self._decode_inference_result(src, torch.cat(final_tokens, dim=0), attention_map)
 
   @torch.inference_mode()
-  def shifted_inference(self, src, part_idx, prev_generation=None):
+  def shifted_inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
     dev = src.device
     encode_out, encode_last_hidden = self.encoder(src.unsqueeze(0)) # 
 
@@ -658,7 +378,7 @@ class QkvAttnSeq2seq(AttentionSeq2seq):
     #-------------
     not_triplet_vocab_list = [ i for i, dur in enumerate(self.tokenizer.vocab['duration'][3:], 3) if (dur%0.5) != 0.0]
     #-------------
-    measure_duration = self.tokenizer.measure_duration[part_idx]
+    measure_duration = self._get_measure_duration(part_idx)
     current_measure_idx = 0
     measure_changed = 1
 
@@ -668,23 +388,33 @@ class QkvAttnSeq2seq(AttentionSeq2seq):
 
     final_tokens = []
     if prev_generation is not None:
-      emb = self.decoder._get_embedding(prev_generation)
-      decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
-      start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
-      final_tokens.append(start_token)
-      current_measure_idx = 2
+      final_tokens, current_measure_idx, last_hidden = self._apply_prev_generation(prev_generation, final_tokens, last_hidden, encode_out)
+      # emb = self.decoder._get_embedding(prev_generation)
+      # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+      # start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
+      # final_tokens.append(start_token)
+      # current_measure_idx = 2
     selected_token = start_token
     current_beat = Fraction(0, 1)
 
     total_attention_weights = []
     # while True:
     triplet_sum = 0 
+    condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
+
     for i in range(300):
       emb = self.decoder._get_embedding(selected_token)
-      decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
-      attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
-      combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+      # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+      # attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+      # combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+      combined_value, last_hidden, attention_weight = self._run_inference_on_step(emb, last_hidden, encode_out)
       selected_token = self.decoder.sampling_process(combined_value, not_triplet_vocab_list)
+      if fix_first_beat and current_beat - compensate_beat[1] == 0.0:
+        for src_token in src:
+          if src_token[-1] == condition_tokens[-1] and self.tokenizer.vocab['offset'][src_token[3].item()] - compensate_beat[0] == 0.0:
+            # if measure_idx is same and offset is same
+            selected_token[0, 0] = src_token[1] # get pitch from src
+            break
       
       if selected_token[0, 0]==self.tokenizer.tok2idx['pitch']['end'] or selected_token[0, 1]==self.tokenizer.tok2idx['duration']['end']:
         break
@@ -692,7 +422,7 @@ class QkvAttnSeq2seq(AttentionSeq2seq):
       # update beat position and beat strength
       current_dur = self.tokenizer.vocab['duration'][selected_token[0, 1]]
       if Fraction(current_dur).limit_denominator(3).denominator == 3:
-        triplet_sum += 1
+        triplet_sum += Fraction(current_dur).limit_denominator(3).numerator
       elif triplet_sum != 0:
         # print("Triplet has to appear but not", current_dur,)
         triplet_sum += 1
@@ -753,33 +483,79 @@ class QkvAttnSeq2seq(AttentionSeq2seq):
     return attention_vectors, attention_weight 
 
 
+class QkvAttnSeq2seqMore(QkvAttnSeq2seq):
+  def __init__(self, vocab, config):
+    super().__init__(vocab, config)
 
-class QkvAttnSeq2seqOrch(QkvAttnSeq2seq):
-  def __init__(self, enc_tokenizer, dec_tokenizer, config):
-    super().__init__(dec_tokenizer, config)
-    self.encoder = Encoder(enc_tokenizer.vocab_size_dict, config)  
-    self.enc_converter = Converter(enc_tokenizer)
-    self.dynamic_template = {x/2: 'weak' for x in range(0, 90, 3)}
-    self.dynamic_template[0.0] =  'strong'
-    self.dynamic_template[15.0] =  'strong'
-    self.dynamic_template[9.0] =  'middle'
-    self.dynamic_template[21.0] =  'middle'
+  def _make_encoder_and_decoder(self):
+    self.encoder = EncoderWithDropout(self.vocab_size_dict, self.config)
+    self.decoder = QkvAttnDecoderMore(self.vocab_size_dict, self.config)
+    
+  def _run_inference_on_step(self, selected_token, encoder_output):
+    last_hidden = encoder_output['last_hidden']
+    if not isinstance(last_hidden, list):
+      last_hidden = [last_hidden, None]
+    emb = self.decoder._get_embedding(selected_token)
+    decode_out, last_hidden[0] = self.decoder.rnn(emb.unsqueeze(0), last_hidden[0])
+    attention_vectors, attention_weight = self._get_attention_vector(encoder_output["encode_out"], decode_out)
+    combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+    combined_value, last_hidden[1] = self.decoder.final_rnn(combined_value, last_hidden[1])
+    logit = self.decoder.proj(combined_value)
+    encoder_output['last_hidden'] = last_hidden
+    return logit, encoder_output, attention_weight
 
-  def _decode_inference_result(self, src, output, other_out):
-    return self.enc_converter(src[1:-1]), self.converter(output), other_out
+  def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output:dict):
+    emb = self.decoder._get_embedding(prev_generation)
+    decode_out, encoder_output["last_hidden"] = self.decoder.rnn(emb.unsqueeze(0), encoder_output["last_hidden"])
+    attention_vectors, attention_weight = self._get_attention_vector(encoder_output["encode_out"], decode_out)
+    combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+    combined_value, last_hidden2 = self.decoder.final_rnn(combined_value)
+    
+    dev = emb.device
+    
+    
+    start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
+    final_tokens.append(start_token)
+    current_measure_idx = 2
+    
+    encoder_output["last_hidden"] = [encoder_output["last_hidden"], last_hidden2]
+
+    return final_tokens, current_measure_idx, encoder_output
+
+
+# class QkvAttnSeq2seqOrch(QkvAttnSeq2seq):
+#   def __init__(self, enc_tokenizer, dec_tokenizer, config):
+#     super().__init__(dec_tokenizer, config)
+#     self.encoder = Encoder(enc_tokenizer.vocab_size_dict, config)  
+#     self.enc_converter = Converter(enc_tokenizer)
+#     self.dynamic_template = {x/2: 'weak' for x in range(0, 90, 3)}
+#     self.dynamic_template[0.0] =  'strong'
+#     self.dynamic_template[15.0] =  'strong'
+#     self.dynamic_template[9.0] =  'middle'
+#     self.dynamic_template[21.0] =  'middle'
+
+
+class QkvAttnSeq2seqOrch(QkvAttnSeq2seqMore):
+  def __init__(self, tokenizer, config):
+    super().__init__(tokenizer, config)
+    self.converter = Converter(tokenizer)
+    self.dynamic_template = get_dynamic_template_for_orch()
   
-  def update_condition_info(self, current_beat, current_measure_idx, measure_duration, current_dur):
-    if current_dur in ('start', 'pad'):
-      current_dur = 0.0
-    current_beat += current_dur
-    if float(current_beat) >= measure_duration:
-      current_measure_idx += 1 #마디 수 늘려주기
-      measure_changed = 1
-      current_beat = current_beat - measure_duration
-    else:
-      measure_changed = 0
+  def _make_encoder_and_decoder(self):
+    self.encoder = EncoderWithDropout(self.vocab_size_dict, self.config)  
+    self.decoder = QkvAttnDecoderMore(self.vocab_size_dict, self.config)
+    
+  # def _make_encoder_and_decoder(self):
+  #   self.encoder = TransEncoder(self.vocab_size_dict, self.config)
+  #   self.decoder = TransDecoder(self.vocab_size_dict, self.config)
+    
+  def _decode_inference_result(self, src, output, other_out):
+    return self.converter(src[1:-1]), self.converter(output), other_out
+  
+  def _get_measure_duration(self, part_idx):
+    return 30.0 # Currently fixed to 30
+  
 
-    return current_beat, current_measure_idx, measure_changed
   
   def encode_condition_token(self, part_idx, current_beat, current_measure_idx, measure_start):
     condition_features = []
@@ -808,7 +584,7 @@ class QkvAttnSeq2seqOrch(QkvAttnSeq2seq):
     # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
     start_token = self.get_start_token(part_idx).to(dev)
     assert src.ndim == 2 # sequence length, feature length
-    measure_duration = 30.0
+    measure_duration = self._get_measure_duration(part_idx)
     current_measure_idx = 0
     measure_changed = 1
 
@@ -818,11 +594,7 @@ class QkvAttnSeq2seqOrch(QkvAttnSeq2seq):
 
     final_tokens = []
     if prev_generation is not None:
-      emb = self.decoder._get_embedding(prev_generation)
-      decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
-      start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
-      final_tokens.append(start_token)
-      current_measure_idx = 2
+      final_tokens, current_measure_idx, last_hidden = self._apply_prev_generation(prev_generation, final_tokens, last_hidden, encode_out)
     selected_token = start_token
     current_beat = 0.0
 
@@ -830,22 +602,28 @@ class QkvAttnSeq2seqOrch(QkvAttnSeq2seq):
     # while True:
     for i in range(500):
       # print("selected token is", selected_token)
-      emb = self.decoder._get_embedding(selected_token)
-      decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
-      attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
-      combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+      emb = self.decoder._get_embedding(selected_token) 
+      combined_value, last_hidden, attention_weight = self._run_inference_on_step(emb, last_hidden, encode_out)
       selected_token = self.decoder.sampling_process(combined_value)
-      
+
       if selected_token[0, 0]==self.tokenizer.tok2idx['pitch']['end'] or selected_token[0, 1]==self.tokenizer.tok2idx['duration']['end']:
         break
       
       # update beat position and beat strength
       current_dur = self.tokenizer.vocab['duration'][selected_token[0, 1]]
+      if current_dur + current_beat > measure_duration:
+        if measure_duration - current_beat in self.tokenizer.tok2idx['duration']:
+          selected_token[0, 1] = self.tokenizer.tok2idx['duration'][measure_duration - current_beat]
+          current_dur = measure_duration - current_beat
+        elif measure_duration - current_beat > 3.0:
+          selected_token[0, 1] = self.tokenizer.tok2idx['duration'][3.0]
+          current_dur = 3.0
+        else:
+          selected_token[0, 1] = self.tokenizer.tok2idx['duration'][0.5]
+          current_dur = 0.5
       current_beat, current_measure_idx, measure_changed = self.update_condition_info(current_beat, current_measure_idx, measure_duration, current_dur)
       if 'measure_idx' in self.tokenizer.tok2idx and current_measure_idx > self.tokenizer.vocab['measure_idx'][-1]:
         break
-      # if float(current_beat) == 10.0:
-      #   print(f"Current Beat ==10.0 detected! cur_beat: {current_beat}, measure_dur: {measure_duration}, cur_measure_idx: {current_measure_idx}, cur_dur: {current_dur}, triplet_sum: {triplet_sum}")
       condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
       
       # make new token for next rnn timestep
@@ -866,254 +644,306 @@ class QkvAttnSeq2seqOrch(QkvAttnSeq2seq):
     return self._decode_inference_result(src, cat_out, (attention_map, cat_out, newly_generated))
 
 
-class QkvAttnDecoder(nn.Module):
-  def __init__(self, vocab_size_dict: dict, param):
-    super().__init__()
-    self.param = param
-    self.vocab_size = [x for x in vocab_size_dict.values()] 
-    self.vocab_size_dict = vocab_size_dict
-    self._make_embedding_layer()
-    self.gru_size = self.param.gru.hidden_size
-    if self.param.gru.hidden_size != self.gru_size:
-      self.reduce_enc = nn.Linear(self.param.gru.hidden_size, self.gru_size)
-    
-    self.rnn = nn.GRU(self.param.emb.total_size, self.gru_size, num_layers=self.param.gru.num_layers, batch_first=True)
-    self.hidden_size = self.param.gru.hidden_size
-    self.num_layers = self.param.gru.num_layers
-    self._make_projection_layer()
-    self.query = nn.Linear(self.gru_size, self.hidden_size)
-    self.key = nn.Linear(self.hidden_size, self.hidden_size)
-    self.value = nn.Linear(self.hidden_size, self.hidden_size)
+class QkvAttnSeq2seqGMG(QkvAttnSeq2seqOrch):
+  def __init__(self, enc_tokenizer, tokenizer, config):
+    super().__init__(tokenizer, config)
+    self.converter = Converter(tokenizer)
+    self.encoder = Encoder(enc_tokenizer.vocab_size_dict, config)  
+    self.enc_converter = Converter(enc_tokenizer)
+
+
+
+class TransSeq2seq(Seq2seq):
+  def __init__(self, tokenizer, config):
+    super().__init__(tokenizer, config)
+
+    self.decoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 120)
+
+
+  def _make_encoder_and_decoder(self):
+    self.encoder = JeongganTransEncoder(self.vocab_size_dict, self.config)
+    self.decoder = JeongganTransDecoder(self.vocab_size_dict, self.config)
+
   
-  def _make_embedding_layer(self):
-    self.emb = MultiEmbedding(self.vocab_size_dict, self.param.emb)
-    
-  def _make_projection_layer(self):
-    # total_vocab_size = sum([x for x in self.vocab_size_dict.values()])
-    # self.proj = nn.Linear(self.hidden_size, self.vocab_size[1] + self.vocab_size[2])
-    self.proj = nn.Linear(self.hidden_size + self.gru_size, self.vocab_size[1] + self.vocab_size[2])
-
-  def _get_embedding(self, input_seq):
-    if isinstance(input_seq, PackedSequence):
-      emb = PackedSequence(self.emb(input_seq[0]), input_seq[1], input_seq[2], input_seq[3])
-    else:
-      emb = self.emb(input_seq)
-    return emb
+  def forward(self, src, tgt):
+    enc_out, src_mask = self.encoder(src)
+    dec_out = self.decoder(tgt, enc_out, src_mask)
+    return dec_out, None
   
-  def _apply_softmax(self, logit):
-    pitch_output = torch.softmax(logit[...,:self.vocab_size[1]], dim=-1)
-    # print(logit.shape)
-    dur_output = torch.softmax(logit[...,self.vocab_size[1] :], dim=-1)
-    # print(f"{pitch_output.shape, dur_output.shape}!!")
-    return torch.cat([pitch_output, dur_output], dim=-1) 
-  
-  def run_decoder(self, x, enc_output):
-    if isinstance(x, PackedSequence):
-      emb = self._get_embedding(x)
-      out, last_hidden = self.rnn(emb, enc_output)
-    return out, last_hidden
+  def _run_inference_on_step(self, final_tokens, encoder_output):
+    enc_out, enc_mask = encoder_output['encode_out'], encoder_output['enc_mask']
+    logit = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    return logit[:, -1:], encoder_output, torch.zeros_like(enc_out) # TODO: Return attention weights
 
-  def forward(self, src, tgt, enc_hidden_state_by_t, enc_out):
-    if enc_out.shape[-1] != self.gru_size:
-      enc_out = self.reduce_enc(enc_out)
-    dec_hidden_state_by_t, dec_out = self.run_decoder(tgt, enc_out)
-    mask = pad_packed_sequence(src, batch_first=True)[0][... , 1:2] != 0
+  def run_encoder(self, src):
+    assert src.ndim == 2
+    enc_out, enc_mask = self.encoder(src.unsqueeze(0)) 
+    return {"encode_out": enc_out, "enc_mask": enc_mask}
 
-    encoder_hidden_states, source_lens = pad_packed_sequence(enc_hidden_state_by_t, batch_first=True)
-    decoder_hidden_states, target_lens = pad_packed_sequence(dec_hidden_state_by_t, batch_first=True)
+  def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output):
+    dev = prev_generation.device
+    start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 3, 3, 5]]).to(dev)], dim=-1)
+    final_tokens = torch.cat([prev_generation, start_token], dim=0)
+    current_measure_idx = 2
 
-    query = self.query(decoder_hidden_states)
-    # print(query.shape)
-    key = self.key(encoder_hidden_states)
-    value = self.value(encoder_hidden_states)
-    
-    attention_score = torch.bmm(key, query.transpose(1, 2))
-    attention_score = attention_score.masked_fill(mask == 0, -float("inf"))
-    attention_weight = torch.softmax(attention_score, dim=1)
-    attention_vec = torch.bmm(attention_weight.transpose(1, 2), value)
+    return [final_tokens[i:i+1] for i in range(len(final_tokens))], current_measure_idx, encoder_output
 
-    dec_output = torch.cat([decoder_hidden_states, attention_vec], dim=-1)
-
-    logit = self.proj(dec_output)
-
-    prob = self._apply_softmax(logit)
-    prob = pack_padded_sequence(prob, target_lens, batch_first=True, enforce_sorted=False)
-    return prob, attention_weight
-
-  def _select_token(self, prob: torch.Tensor):
-    tokens = []
-    # print(prob.shape)
-    pitch_token = prob[0, :, :self.vocab_size[1]].multinomial(num_samples=1)
-    dur_token = prob[0, :, self.vocab_size[1]:].multinomial(num_samples=1)
-    # pitch_token = torch.argmax(prob[0, :, :self.vocab_size[1]], dim=-1, keepdim=True)
-    # dur_token = torch.argmax(prob[0, :, self.vocab_size[1]:], dim=-1, keepdim=True)
-    return torch.cat([pitch_token, dur_token], dim=-1)
-  
-  def sampling_process(self, out, not_triplet_vocab_list=None): # 처음에는 encoder_output = last_hidden
-    # out : 3차원 tensor
-    logit = self.proj(out) 
-    # print(logit.shape)
-    if not_triplet_vocab_list != None:
-      # print(f'model.py line 247: logit.shape={logit.shape}, vocab_size={self.vocab_size}')
-      not_triplet_vocab_list = [i+self.vocab_size[1] for i in not_triplet_vocab_list]
-      # logit[..., not_triplet_vocab_list] = -1e10
-      
-    prob = self._apply_softmax(logit)
-    selected_token = self._select_token(prob)
-    return selected_token
-
-class QkvAttnDecoderMore(QkvAttnDecoder):
-  def __init__(self, vocab_size_dict: dict, param):
-    super().__init__(vocab_size_dict, param)
-    self.final_rnn = nn.GRU(self.hidden_size + self.gru_size, self.hidden_size, batch_first=True)
-
-  def _make_projection_layer(self):
-    self.proj = nn.Linear(self.hidden_size, self.vocab_size[1] + self.vocab_size[2])
-
-  def forward(self, src, tgt, enc_hidden_state_by_t, enc_out):
-    if enc_out.shape[-1] != self.gru_size:
-      enc_out = self.reduce_enc(enc_out)
-    dec_hidden_state_by_t, dec_out = self.run_decoder(tgt, enc_out)
-    mask = pad_packed_sequence(src, batch_first=True)[0][... , 1:2] != 0
-
-    encoder_hidden_states, source_lens = pad_packed_sequence(enc_hidden_state_by_t, batch_first=True)
-    decoder_hidden_states, target_lens = pad_packed_sequence(dec_hidden_state_by_t, batch_first=True)
-
-    query = self.query(decoder_hidden_states)
-    # print(query.shape)
-    key = self.key(encoder_hidden_states)
-    value = self.value(encoder_hidden_states)
-    
-    attention_score = torch.bmm(key, query.transpose(1, 2))
-    attention_score = attention_score.masked_fill(mask == 0, -float("inf"))
-    attention_weight = torch.softmax(attention_score, dim=1)
-    attention_vec = torch.bmm(attention_weight.transpose(1, 2), value)
-
-    dec_output = torch.cat([decoder_hidden_states, attention_vec], dim=-1)
-    dec_output, _ = self.final_rnn(dec_output)
-
-    logit = self.proj(dec_output)
-
-    prob = self._apply_softmax(logit)
-    prob = pack_padded_sequence(prob, target_lens, batch_first=True, enforce_sorted=False)
-    return prob, attention_weight
-
-
-class QkvAttnSeq2seqMore(QkvAttnSeq2seq):
-  def __init__(self, vocab, config):
-    super().__init__(vocab, config)
-    self.decoder = QkvAttnDecoderMore(self.vocab_size_dict, self.config)
-
-
-class QkvRollSeq2seq(QkvAttnSeq2seq):
-  def __init__(self, vocab, config):
-    super().__init__(vocab, config)    
-    self.encoder.return_reduced_bidirectional = False
-    if hasattr(config, 'sampling_rate'):
-      self.sampling_rate = config.sampling_rate 
-
-    self.converter = RollConverter(self.tokenizer, self.sampling_rate)
-    self.decoder = QkvRollDecoder(self.vocab_size_dict, self.config)
-    self.dynamic_template_list = make_dynamic_template(beat_sampling_num=self.sampling_rate)
-    self.dynamic_template_list = [convert_dynamics_to_integer(d) for d in self.dynamic_template_list]
-
-  def forward(self, src, dec_input):
-    enc_out, enc_last_hidden = self.encoder(src)
-    dec_out = self.decoder(src, dec_input, enc_out, enc_last_hidden)
-    return dec_out
-  
-  def make_dec_input(self, part_idx, measure_len):
-    dynamic_template = self.dynamic_template_list[part_idx]
-    num_frames = len(dynamic_template) * measure_len
-
-    output = np.zeros((num_frames, 4), dtype=np.int32)
-    output[:, 0] = part_idx
-    output[:, 1] = 0 # add dummy note
-    output[:, 2] = dynamic_template * measure_len
-    output[:, 3] = np.arange(num_frames)
-
-    output = torch.LongTensor([self.tokenizer(frame)  for frame in output] )
-    return output[:, [0, 2, 3]]
-    
-
-  @torch.inference_mode()
-  def inference(self, src, target_idx):
+  def shifted_inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
     dev = src.device
-    encode_out, enc_last_hidden = self.encoder(src.unsqueeze(0)) 
-    src_part_idx = int(src[0][0])
+    assert src.ndim == 2
+    enc_out, enc_mask = self.encoder(src.unsqueeze(0)) 
 
-    measure_len = int(src.shape[0] / self.sampling_rate / MEAS_LEN_BY_IDX[src_part_idx])
-    dec_input = self.make_dec_input(target_idx, measure_len).to(dev)
-    dec_input = self.decoder._get_embedding(dec_input)
-    decode_out, last_hidden = self.decoder.rnn(dec_input.unsqueeze(0), enc_last_hidden)
-    attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
-    combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
-    combined_value = combined_value.squeeze(0)
-    logit = self.decoder.proj(combined_value)
-    selected_pitch = torch.argmax(logit, dim=-1)
+    # Setup for 0th step
+    # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
+    start_token = self.get_start_token(part_idx).to(dev)
 
-    selected_token = [[target_idx, int(p)] for p in selected_pitch]
+    #-------------
+    # not_triplet_vocab_list = [ i for i, dur in enumerate(self.tokenizer.vocab['duration'][3:], 3) if (dur%0.5) != 0.0]
+    #-------------
+    measure_duration = self._get_measure_duration(part_idx)
+    current_measure_idx = 0
+    measure_changed = 1
 
+    final_tokens = [start_token]
+    if prev_generation is not None:
+      final_tokens, current_measure_idx, last_hidden = self._apply_prev_generation(prev_generation, final_tokens, last_hidden, enc_out)
+      # emb = self.decoder._get_embedding(prev_generation)
+      # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+      # start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
+      # final_tokens.append(start_token)
+      # current_measure_idx = 2
+    selected_token = start_token
+
+    current_beat = Fraction(0, 1)
+
+    total_attention_weights = []
+    # while True:
+    triplet_sum = 0 
+    condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
+
+    for i in range(300):
+      # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+      # attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+      # combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+      # combined_value, last_hidden, attention_weight = self._run_inference_on_step(emb, last_hidden, encode_out)
+      prob = self.decoder(torch.cat(final_tokens, dim=0).unsqueeze(0), enc_out, enc_mask)
+      selected_token = self.decoder._select_token(prob[:, -1:])
+      # for rule_base fixing
+      if fix_first_beat and current_beat - compensate_beat[1] == 0.0:
+        for src_token in src:
+          if src_token[-1] == condition_tokens[-1] and self.tokenizer.vocab['offset'][src_token[3].item()] - compensate_beat[0] == 0.0:
+            # if measure_idx is same and offset is same
+            selected_token[0, 0] = src_token[1] # get pitch from src
+            break
       
-    return self.converter([note[:2] for note in src]), self.converter(selected_token), (attention_weight, selected_token, selected_token[-len(self.dynamic_template_list[target_idx])*2:-len(self.dynamic_template_list[target_idx])])
-
-
-class QkvRollDecoder(QkvAttnDecoder):
-  def __init__(self, vocab_size_dict: dict, param):
-    self.param = param
-    super().__init__(vocab_size_dict, param)
-    self.rnn = nn.GRU(self.emb.total_size, self.hidden_size, num_layers=param.gru.num_layers, batch_first=True, bidirectional=True, dropout=param.gru.dropout)
-    self.query = nn.Linear(self.hidden_size * 2, self.hidden_size)
-    self.key = nn.Linear(self.hidden_size * 2, self.hidden_size)
-    self.value = nn.Linear(self.hidden_size * 2, self.hidden_size)
-    self.dropout = nn.Dropout(param.gru.dropout)
-
-  def _make_embedding_layer(self): # 
-    vocab_size_dict = copy.copy(self.vocab_size_dict)
-    vocab_size_dict.pop('pitch')
-    self.emb = MultiEmbedding(vocab_size_dict, self.param.emb)
-
-
-  def _apply_softmax(self, logit):
-    pitch_output = torch.softmax(logit, dim=-1)
-    return pitch_output
-
-  def _make_projection_layer(self):
-    # total_vocab_size = sum([x for x in self.vocab_size_dict.values()])
-    self.proj = nn.Linear(self.hidden_size * 3, self.vocab_size[1]) # pitch + is_onset
-    
-  def forward(self, src, dec_input, enc_hidden_state_by_t, enc_out):
-    if isinstance(dec_input, PackedSequence):
-      emb = self._get_embedding(dec_input.data)
-      emb = PackedSequence(emb, dec_input[1], dec_input[2], dec_input[3])
-      dec_hidden_state_by_t, dec_out = self.rnn(emb, enc_out)
-      mask = pad_packed_sequence(src, batch_first=True)[0][... , 1:2] != 0
-      # out = pad_packed_sequence(out, batch_first=True)[0]
-      encoder_hidden_states, source_lens = pad_packed_sequence(enc_hidden_state_by_t, batch_first=True)
-      decoder_hidden_states, target_lens = pad_packed_sequence(dec_hidden_state_by_t, batch_first=True)
-      query = self.query(decoder_hidden_states)
-      key = self.key(encoder_hidden_states)
-      value = self.value(encoder_hidden_states)
+      if selected_token[0, 0]==self.tokenizer.tok2idx['pitch']['end'] or selected_token[0, 1]==self.tokenizer.tok2idx['duration']['end']:
+        break
       
-      attention_score = torch.bmm(key, query.transpose(1, 2))
-      attention_score = attention_score.masked_fill(mask == 0, -float("inf"))
-      attention_weight = torch.softmax(attention_score, dim=1)
-      attention_vec = torch.bmm(attention_weight.transpose(1, 2), value)
-      dec_output = torch.cat([decoder_hidden_states, attention_vec], dim=-1)
-      dec_output = self.dropout(dec_output)
+      # update beat position and beat strength
+      current_dur = self.tokenizer.vocab['duration'][selected_token[0, 1]]
+      if Fraction(current_dur).limit_denominator(3).denominator == 3:
+        triplet_sum += Fraction(current_dur).limit_denominator(3).numerator
+      elif triplet_sum != 0:
+        # print("Triplet has to appear but not", current_dur,)
+        triplet_sum += 1
+        # print(current_dur, selected_token)
+        current_dur = Fraction(1,3)
+        selected_token = torch.LongTensor([[selected_token[0,0], self.tokenizer.tok2idx['duration'][current_dur]]]).to(dev)
+        # print(current_dur, selected_token)
+      else:
+        triplet_sum = 0
+      if triplet_sum == 3:
+        triplet_sum = 0
+      current_beat, current_measure_idx, measure_changed = self.update_condition_info(current_beat, current_measure_idx, measure_duration, current_dur)
+      if 'measure_idx' in self.tokenizer.tok2idx and current_measure_idx > self.tokenizer.vocab['measure_idx'][-1]:
+        break
+      if float(current_beat) == 10.0:
+        print(f"Current Beat ==10.0 detected! cur_beat: {current_beat}, measure_dur: {measure_duration}, cur_measure_idx: {current_measure_idx}, cur_dur: {current_dur}, triplet_sum: {triplet_sum}")
+      condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
+      # make new token for next rnn timestep
+      selected_token = torch.cat([torch.LongTensor([[part_idx]]).to(dev), selected_token, torch.LongTensor([condition_tokens]).to(dev)], dim=1)
       
-      logit = self.proj(dec_output)
-      prob = self._apply_softmax(logit)
-      prob = pack_padded_sequence(prob, target_lens, batch_first=True, enforce_sorted=False)
+      final_tokens.append(selected_token)
       
+    if len(total_attention_weights) == 0:
+      attention_map = None
     else:
-      raise NotImplementedError
-    return prob, attention_weight
+      attention_map = torch.stack(total_attention_weights, dim=1)
+      
+    cat_out = torch.cat(final_tokens[1:], dim=0) #token shape: [1,6] => [24,6]
+    newly_generated = cat_out.clone()
+    if prev_generation is not None:
+      cat_out = torch.cat([prev_generation[1:], cat_out], dim=0)
+        #  self.converter(src[1:-1]), self.converter(torch.cat(final_tokens, dim=0)), attention_map
+    return self._decode_inference_result(src, cat_out, (attention_map, cat_out, newly_generated))
+
+class JeongganTransSeq2seq(Seq2seq):
+  def __init__(self, tokenizer, config):
+    self.vocab_size = len(tokenizer.vocab)
+    self.pred_vocab_size = tokenizer.pred_vocab_size
+    super().__init__(tokenizer, config)
+    # self.tokenizer = tokenizer
+    # self.vocab_size_dict = self.tokenizer.vocab_size_dict
+
+  def _make_encoder_and_decoder(self):
+    self.encoder = JeongganTransEncoder(self.vocab_size, self.config)
+    self.decoder = JeongganTransDecoder(self.vocab_size, self.pred_vocab_size, self.config)
+    
+  
+  def forward(self, src, tgt):
+    enc_out, src_mask = self.encoder(src)
+    dec_out = self.decoder(tgt, enc_out, src_mask)
+    return dec_out, None
+  
+  def _run_inference_on_step(self, final_tokens, encoder_output):
+    enc_out, enc_mask = encoder_output['encode_out'], encoder_output['enc_mask']
+    kv_cache = encoder_output['kv_cache']
+    # logit, _ = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    logit, encoder_output['kv_cache'] = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True, cache=kv_cache)
+    return logit[:, -1:], encoder_output, torch.zeros_like(enc_out) # TODO: Return attention weights
+
+  def run_encoder(self, src):
+    assert src.ndim == 2
+    enc_out, enc_mask = self.encoder(src.unsqueeze(0))
+    return {"encode_out": enc_out, "enc_mask": enc_mask, 'kv_cache': None}
+
+  def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output):
+    dev = prev_generation.device
+    start_token = torch.cat([prev_generation[-1:, :1].to(dev),  torch.LongTensor([self.tokenizer(['prev\n', 'jg:0', 'gak:2'])]).to(dev), prev_generation[-1:, -1:] ], dim=-1)
+    final_tokens = torch.cat([prev_generation, start_token], dim=0)
+    current_measure_idx = 2
+    final_tokens = [final_tokens[i:i+1] for i in range(len(final_tokens))]
+    return final_tokens, current_measure_idx, encoder_output
+
+  def shifted_inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
+    dev = src.device
+    assert src.ndim == 2
+    enc_out, enc_mask = self.encoder(src.unsqueeze(0)) 
+
+    # Setup for 0th step
+    # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
+    start_token = self.get_start_token(part_idx).to(dev)
+
+    #-------------
+    # not_triplet_vocab_list = [ i for i, dur in enumerate(self.tokenizer.vocab['duration'][3:], 3) if (dur%0.5) != 0.0]
+    #-------------
+    measure_duration = self._get_measure_duration(part_idx)
+    current_measure_idx = 0
+    measure_changed = 1
+
+    final_tokens = [start_token]
+    if prev_generation is not None:
+      final_tokens, current_measure_idx, last_hidden = self._apply_prev_generation(prev_generation, final_tokens, last_hidden, enc_out)
+      # emb = self.decoder._get_embedding(prev_generation)
+      # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+      # start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)
+      # final_tokens.append(start_token)
+      # current_measure_idx = 2
+    selected_token = start_token
+
+    current_beat = Fraction(0, 1)
+
+    total_attention_weights = []
+    # while True:
+    triplet_sum = 0 
+    condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
+
+    for i in range(300):
+      # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
+      # attention_vectors, attention_weight = self._get_attention_vector(encode_out, decode_out)
+      # combined_value = torch.cat([decode_out, attention_vectors], dim=-1)
+      # combined_value, last_hidden, attention_weight = self._run_inference_on_step(emb, last_hidden, encode_out)
+      prob = self.decoder(torch.cat(final_tokens, dim=0).unsqueeze(0), enc_out, enc_mask)
+      selected_token = self.decoder._select_token(prob[:, -1:])
+      # for rule_base fixing
+      if fix_first_beat and current_beat - compensate_beat[1] == 0.0:
+        for src_token in src:
+          if src_token[-1] == condition_tokens[-1] and self.tokenizer.vocab['offset'][src_token[3].item()] - compensate_beat[0] == 0.0:
+            # if measure_idx is same and offset is same
+            selected_token[0, 0] = src_token[1] # get pitch from src
+            break
+      
+      if selected_token[0, 0]==self.tokenizer.tok2idx['pitch']['end'] or selected_token[0, 1]==self.tokenizer.tok2idx['duration']['end']:
+        break
+      
+      # update beat position and beat strength
+      current_dur = self.tokenizer.vocab['duration'][selected_token[0, 1]]
+      if Fraction(current_dur).limit_denominator(3).denominator == 3:
+        triplet_sum += Fraction(current_dur).limit_denominator(3).numerator
+      elif triplet_sum != 0:
+        # print("Triplet has to appear but not", current_dur,)
+        triplet_sum += 1
+        # print(current_dur, selected_token)
+        current_dur = Fraction(1,3)
+        selected_token = torch.LongTensor([[selected_token[0,0], self.tokenizer.tok2idx['duration'][current_dur]]]).to(dev)
+        # print(current_dur, selected_token)
+      else:
+        triplet_sum = 0
+      if triplet_sum == 3:
+        triplet_sum = 0
+      current_beat, current_measure_idx, measure_changed = self.update_condition_info(current_beat, current_measure_idx, measure_duration, current_dur)
+      if 'measure_idx' in self.tokenizer.tok2idx and current_measure_idx > self.tokenizer.vocab['measure_idx'][-1]:
+        break
+      if float(current_beat) == 10.0:
+        print(f"Current Beat ==10.0 detected! cur_beat: {current_beat}, measure_dur: {measure_duration}, cur_measure_idx: {current_measure_idx}, cur_dur: {current_dur}, triplet_sum: {triplet_sum}")
+      condition_tokens = self.encode_condition_token(part_idx, current_beat, current_measure_idx, measure_changed)
+      # make new token for next rnn timestep
+      selected_token = torch.cat([torch.LongTensor([[part_idx]]).to(dev), selected_token, torch.LongTensor([condition_tokens]).to(dev)], dim=1)
+      
+      final_tokens.append(selected_token)
+      
+    if len(total_attention_weights) == 0:
+      attention_map = None
+    else:
+      attention_map = torch.stack(total_attention_weights, dim=1)
+      
+    cat_out = torch.cat(final_tokens[1:], dim=0) #token shape: [1,6] => [24,6]
+    newly_generated = cat_out.clone()
+    if prev_generation is not None:
+      cat_out = torch.cat([prev_generation[1:], cat_out], dim=0)
+        #  self.converter(src[1:-1]), self.converter(torch.cat(final_tokens, dim=0)), attention_map
+    return self._decode_inference_result(src, cat_out, (attention_map, cat_out, newly_generated))
 
 
- 
+
+class JeongganBERT(nn.Module):
+  def __init__(self, tokenizer, config):
+    super().__init__()
+    self.tokenizer = tokenizer
+    self.converter = tokenizer
+    self.vocab_size = len(tokenizer.vocab)
+    self.pred_vocab_size = tokenizer.pred_vocab_size
+    self.config = config
+
+    self.encoder = JeongganTransEncoder(self.vocab_size, self.config)
+    self.proj = nn.Linear(config.dim, self.pred_vocab_size * 2)
+    self.pred_vocab_size = self.pred_vocab_size
+    self.is_condition_shifted = False
+    
+  
+  def forward(self, src:torch.Tensor):
+    enc_out, _ = self.encoder(src)
+    logit = self.proj(enc_out)
+    return logit.reshape(logit.shape[0], logit.shape[1], 2, self.pred_vocab_size), None
+  
+  def _run_inference_on_step(self, final_tokens, encoder_output):
+    enc_out, enc_mask = encoder_output['encode_out'], encoder_output['enc_mask']
+    kv_cache = encoder_output['kv_cache']
+    # logit, _ = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    logit, encoder_output['kv_cache'] = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True, cache=kv_cache)
+    return logit[:, -1:], encoder_output, torch.zeros_like(enc_out) # TODO: Return attention weights
+
+  def run_encoder(self, src):
+    assert src.ndim == 2
+    enc_out, enc_mask = self.encoder(src.unsqueeze(0))
+    return {"encode_out": enc_out, "enc_mask": enc_mask, 'kv_cache': None}
 
 
+
+
+
+
+    
 
 
 if __name__ == "__main__":

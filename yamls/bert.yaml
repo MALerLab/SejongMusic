@@ -1,0 +1,58 @@
+general:
+  make_log: True
+  debug: False
+  exp_name: baseline
+  num_exp: 1
+  entity: danbinaerin
+  project: yeominrak
+inference_dir: inference_img/
+param_yaml: 'yeominrak_feature_ratio.yaml'
+
+dataset_class: JGMaskedDataset
+model_class: JeongganBERT
+loss_fn: nll_loss_bert
+collate_fn: pad_collate_transformer
+trainer_class: BertTrainer
+
+
+data:
+  use_pitch_modification: True
+  modification_ratio: 0.3
+  min_meas: 4
+  max_meas: 4
+  sampling_rate: 2
+  target_instrument: 0
+  num_max_inst: 4
+
+
+model:
+  dim: 64
+  depth: 4
+  num_heads: 4
+  dropout: 0.2
+  is_pos_enc: False
+
+train:
+  batch_size: 16
+  # total_iters: 25000
+  num_epoch: 400
+  seed: 42
+  num_workers: 8
+  lr: 1e-3
+
+aug:
+  entire_orn_r: 0.3
+  jg_r: 0.15
+  frame_replace_r: 0.05
+  frame_rand_r: 0.05
+  mask_note_r: 0.15
+  replace_note_r: 0.05
+  erase_note_r: 0.05
+  # entire_orn_r: 0.0
+  # jg_r: 0.0
+  # frame_replace_r: 0.0
+  # frame_rand_r: 0.0
+  # mask_note_r: 0.1
+  # replace_note_r: 0.1
+  # erase_note_r: 0.0
+
