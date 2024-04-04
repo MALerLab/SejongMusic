@@ -4,19 +4,20 @@ import wandb
 import hydra
 from pathlib import Path
 import copy
+from typing import List, Union
 
 import torch
 from torch.utils.data import DataLoader
 from omegaconf import DictConfig, OmegaConf
 
-from sejong_music import yeominrak_processing, model_zoo, loss, utils
+from sejong_music import yeominrak_processing, model_zoo, loss, utils, jg_code, trainer as trainer_zoo
 from sejong_music.yeominrak_processing import pack_collate
 from sejong_music.model_zoo import get_emb_total_size
 from sejong_music.loss import nll_loss, focal_loss
-from sejong_music.trainer import JeongganTrainer
+from sejong_music.trainer import JeongganTrainer, BertTrainer
 from sejong_music.train_utils import CosineLRScheduler
 # from sejong_music.constants import PART, POSITION, PITCH
-from sejong_music.jg_code import JeongganDataset
+from sejong_music.jg_code import JeongganDataset, JGMaskedDataset
 from sejong_music.full_inference import Generator
 
 def make_experiment_name_with_date(config):
@@ -45,8 +46,13 @@ def main(config: DictConfig):
   save_dir.mkdir(parents=True, exist_ok=True)
   # dataset_class = JeongganDataset
   model_class = getattr(model_zoo, config.model_class)
+  dataset_class:Union[JeongganDataset, JGMaskedDataset] = getattr(jg_code, config.dataset_class)
+  trainer_class:Union[JeongganTrainer, BertTrainer] = getattr(trainer_zoo, config.trainer_class)
   
-  train_dataset = JeongganDataset(data_path= original_wd / 'music_score/gen_code', 
+  if not hasattr(config, 'aug'):
+    config.aug = None
+  
+  train_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
                   # slice_measure_num = 2,
                   is_valid=False,
                   # use_pitch_modification=False,
@@ -55,9 +61,10 @@ def main(config: DictConfig):
                   # max_meas=6,
                   # feature_types=['index', 'token', 'position'],
                   # target_instrument='daegeum'
+                  augment_param = config.aug
                   )
   
-  val_dataset = JeongganDataset(data_path= original_wd / 'music_score/gen_code', 
+  val_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
                   # slice_measure_num = 2,
                   is_valid=True,
                   # use_pitch_modification=False,
@@ -66,7 +73,8 @@ def main(config: DictConfig):
                   # max_meas=6,
                   # feature_types=['index', 'token', 'position'],
                   # part_list = PART, position_token = POSITION, pitch_token = PITCH, 
-                  # target_instrument=0
+                  # target_instrument=0,
+                  augment_param = config.aug
                   )
     
   collate_fn = getattr(utils, config.collate_fn)
@@ -110,7 +118,7 @@ def main(config: DictConfig):
 
     # --- Training --- #
     inst_save_dir = save_dir / f'inst_{target_inst_idx}'
-    atrainer = JeongganTrainer(model=model, 
+    atrainer = trainer_class(model=model, 
                                 optimizer=optimizer, 
                                 loss_fn=loss_fn, 
                                 train_loader=train_loader, 
@@ -118,7 +126,8 @@ def main(config: DictConfig):
                                 device = device, 
                                 save_log=config.general.make_log, 
                                 save_dir=inst_save_dir, 
-                                scheduler=scheduler)
+                                scheduler=scheduler,
+                                min_epoch_for_infer=100)
     generator = Generator(config=None,
                           model=model,
                           output_dir=inst_save_dir,
