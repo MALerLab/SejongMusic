@@ -21,7 +21,7 @@ from sejong_music.full_inference import Generator
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
-  return f'{current_time_in_str}_{config.general.exp_name}_{config.dataset_class}_{config.model_class}'
+  return f'{current_time_in_str}_is_pos_counter={config.data.is_pos_counter}_is_pos_enc={config.model.is_pos_enc}_{config.general.exp_name}_{config.dataset_class}_{config.model_class}'
 
 @hydra.main(config_path='yamls/', config_name='transformer_jeonggan')
 def main(config: DictConfig):
@@ -55,6 +55,7 @@ def main(config: DictConfig):
                   # max_meas=6,
                   # feature_types=['index', 'token', 'position'],
                   # target_instrument='daegeum'
+                  is_pos_counter=config.data.is_pos_counter,
                   )
   
   val_dataset = JeongganDataset(data_path= original_wd / 'music_score/gen_code', 
@@ -66,7 +67,8 @@ def main(config: DictConfig):
                   # max_meas=6,
                   # feature_types=['index', 'token', 'position'],
                   # part_list = PART, position_token = POSITION, pitch_token = PITCH, 
-                  # target_instrument=0
+                  # target_instrument=0,
+                  is_pos_counter=config.data.is_pos_counter,
                   )
     
   collate_fn = getattr(utils, config.collate_fn)
@@ -118,7 +120,9 @@ def main(config: DictConfig):
                                 device = device, 
                                 save_log=config.general.make_log, 
                                 save_dir=inst_save_dir, 
-                                scheduler=scheduler)
+                                scheduler=scheduler, 
+                                use_fp16=(device=='cuda'),
+                                is_pos_enc = config.model.is_pos_enc)
     generator = Generator(config=None,
                           model=model,
                           output_dir=inst_save_dir,
