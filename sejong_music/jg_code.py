@@ -8,6 +8,7 @@ from collections import defaultdict, Counter
 from pathlib import Path
 import torch
 
+from .jg_to_staff_converter import JGToStaffConverter
 
 POSITION = ['|', '\n']+ [f":{i}" for i in range(0, 16)]
 PITCH = [ '하하배임','하배황', '하배태', '하배중', '하배임', '하배이', '하배남', '하배무',
@@ -127,6 +128,23 @@ class JeongganPiece:
   def __len__(self):
     return len(self.parts[0].split('\n'))
 
+
+class ABCPiece(JeongganPiece):
+  def __init__(self, txt_fn, gen_str=None, inst_list=None):
+    super().__init__(txt_fn, gen_str, inst_list)
+    self.converter = JGToStaffConverter()
+    
+  def get_abc_notes(self):
+    notes = self.converter._convert_to_notes(self.tokenized_parts[0])
+    self.converter.get_duration_of_notes(notes)
+    total_tokens = []
+    for note in notes:
+      total_tokens.append(note.pitch)
+      total_tokens.append(note.duration)
+      if note.ornaments:
+        for orn in note.ornaments:
+          total_tokens.append(orn)
+    return total_tokens
 
 class JeongganTokenizer:
     def __init__(self, special_token, feature_types=['index', 'token', 'position'], json_fn=None):
