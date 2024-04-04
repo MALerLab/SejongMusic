@@ -7,22 +7,13 @@ from typing import List, Set, Dict, Tuple, Union
 from collections import defaultdict, Counter
 from pathlib import Path
 import torch
+import numpy as np
 
-
-POSITION = ['|', '\n']+ [f":{i}" for i in range(0, 16)]
-PITCH = [ '하하배임','하배황', '하배태', '하배중', '하배임', '하배이', '하배남', '하배무',
-          '배황', '배태', '배협', '배고', '배중', '배임', '배남', '배무', '배응',
-          '황', '태', '협', '고', '중', '임', '이', '남', '무', 
-          '청황', '청태', '청협', '청고', '청중', '청임', '청남', '청무',
-          '중청황']
-PART = ['daegeum', 'piri', 'haegeum', 'gayageum', 'geomungo', 'ajaeng']
+from .jg_to_staff_converter import JGToStaffConverter, Note
+from .constants import POSITION, PITCH, PART
 
 
 
-def read_txt(path):
-  with open(path, 'r') as file:
-    txt = file.read()
-    return txt
 
 class JeongganPiece:
   def __init__(self, txt_fn, gen_str=None, inst_list=None):
@@ -34,7 +25,7 @@ class JeongganPiece:
     else:
       self.txt_fn = txt_fn
       self.name = txt_fn.split('/')[-1].split('_')[0]
-      self.text_str = read_txt(txt_fn)
+      self.text_str = self.read_txt(txt_fn)
       self.inst_list = self.txt_fn[:-4].split('/')[-1].split('_')[1:]
     self.parts, self.part_dict = self.split_to_inst()
     self.check_measure_length()
@@ -124,12 +115,62 @@ class JeongganPiece:
       sliced_by_measure.append({inst: cutted_part[i] for inst, cutted_part in sliced_parts.items()})
     return sliced_parts, sliced_by_measure
   
+  @staticmethod
+  def convert_tokens_to_roll(tokens:List[str], inst:str, num_frame_per_jg=6, num_features=6)->np.ndarray:
+    notes:List[Note] = JGToStaffConverter.convert_to_notes(tokens)
+    JGToStaffConverter.get_duration_of_notes(notes)
+    num_jgs = sum([1 for x in tokens if x in ('|', '\n')])
+
+    outputs = np.zeros((num_jgs * num_frame_per_jg, num_features), dtype=object)
+    outputs[:, 2] = [f'beat:{i}' for i in range(6)] * num_jgs
+    outputs[:, 5] = inst
+    num_jg_per_gak = JeongganPiece.get_measure_length(tokens)
+    cur_idx = 0
+    for i, num_jg in enumerate(num_jg_per_gak):
+      outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, 3] = [f'jg:{i}' for i in np.arange(num_jg).repeat(num_frame_per_jg)]
+      outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, 4] = f'gak:{i}'
+      cur_idx += num_jg*num_frame_per_jg
+
+
+    for note in notes:
+      jg_offset, beat_offset, duration = note.global_jg_offset, note.beat_offset, note.duration
+      if duration is None:
+        duration = 0
+      start_frame = round((jg_offset + beat_offset) * num_frame_per_jg)
+      end_frame = max(round((jg_offset + beat_offset + duration) * num_frame_per_jg), start_frame+1)
+
+      outputs[start_frame, 0] = note.pitch
+      outputs[start_frame+1:end_frame, 0] = '-'
+      if note.ornaments:
+        outputs[start_frame, 1] = note.ornaments[0]
+    #   outputs[start_frame:end_frame, 0] = note.pitch
+    #   if note.ornaments:
+    #     outputs[start_frame, 1] = note.ornaments[0]
+    #   else:
+    #     outputs[start_frame, 1] = '음표시작'
+    outputs[outputs==0] = '비어있음'
+    return outputs
+  
   def __len__(self):
     return len(self.parts[0].split('\n'))
+  
+  @staticmethod
+  def get_measure_length(tokens:List[str]):
+    gak_start_idx = [0] + [i for i, x in enumerate(tokens) if x == '\n']
+    out = []
+    for start, end in zip(gak_start_idx[:-1], gak_start_idx[1:]):
+      out.append(sum([1 for x in tokens[start:end] if x == '|'])+1)
 
+    return out
+
+  @staticmethod
+  def read_txt(path):
+    with open(path, 'r') as file:
+      txt = file.read()
+      return txt
 
 class JeongganTokenizer:
-    def __init__(self, special_token, feature_types=['index', 'token', 'position'], json_fn=None):
+    def __init__(self, special_token, feature_types=['index', 'token', 'position'], is_roll=False, json_fn=None):
         if json_fn:
           self.load_from_json(json_fn)
           return      
@@ -140,7 +181,11 @@ class JeongganTokenizer:
         self.pred_vocab_size = len(existing_tokens+ special_token) + 3 # pad start end
 
         self.vocab = ['pad', 'start', 'end'] + POSITION + PITCH + special_token + PART # + special_token]
-        self.vocab += [f'prev{x}' for x in POSITION] # add prev position token
+        if is_roll:
+          self.vocab += ['mask']
+          self.vocab += [f'beat:{i}' for i in range(6)]
+        else:
+          self.vocab += [f'prev{x}' for x in POSITION] # add prev position token
         self.vocab += [f'jg:{i}' for i in range(20)] # add jg position
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
@@ -149,27 +194,12 @@ class JeongganTokenizer:
         self.pos_vocab = POSITION
         self.note2token = {}
     
-    # def __call__(self, note_feature:Union[List[str], str]):
-    #     if isinstance(note_feature, list):
-    #       if isinstance(note_feature[0], list):
-    #         return [self.hash_note_feature(tuple(x)) for x in note_feature]
-    #       else:
-    #         return [self(x) for x in note_feature]
-    #     return self.tok2idx[note_feature]
     
     def __call__(self, note_feature:Union[List[str], str]):
         if isinstance(note_feature, list):
           return [self(x) for x in note_feature]
         return self.tok2idx[note_feature]      
-      
-    # def hash_note_feature(self, note_feature:Tuple[Union[int, float, str]]):
-    #     try:
-    #         return self.note2token[note_feature]
-    #     except:
-    #         out = [self.tok2idx[x] for x in note_feature]
-    #         self.note2token[note_feature] =  out
-    #         return out
-        
+              
     def save_to_json(self, json_fn):
         with open(json_fn, 'w') as f:
             json.dump(self.vocab, f)
@@ -189,7 +219,21 @@ class JeongganTokenizer:
           return [self.decode(x) for x in idx]
         return self.vocab[idx]
 
-            
+
+# class RollJGTokenizer(JeongganTokenizer):
+#   def __init__(self, special_token, feature_types=['index', 'token', 'position'], json_fn=None):
+#     super().__init__(special_token, feature_types, json_fn)
+
+#   def _update_vocab(self):
+#     new_vocab = [word for word in self.vocab if 'prev' not in word]
+#     new_vocab += ['음표시작', '비어있음']
+#     new_vocab += [f'beat:{i}' for i in range(6)]
+#     self.vocab = new_vocab
+#     self.tok2idx = {value:i for i, value in enumerate(self.vocab) }
+#     self.vocab_size_dict = {'total': len(self.vocab)}
+
+
+
 class JeongganDataset:
   def __init__(self, data_path= Path('music_score/gen_code'),
               slice_measure_num = 4,
@@ -205,6 +249,7 @@ class JeongganDataset:
               piece_list:List[JeongganPiece]=None,
               tokenizer:JeongganTokenizer=None):
     
+    data_path = Path(data_path)
     self.data_path = data_path
     self.is_valid = is_valid
     self.position_tokens = position_tokens
@@ -216,13 +261,7 @@ class JeongganDataset:
       all_pieces = [JeongganPiece(text) for text in texts]
       self.all_pieces = [x for x in all_pieces if x.is_clean]
     
-    if tokenizer:
-      self.tokenizer = tokenizer
-      self.vocab = tokenizer.vocab
-    else:
-      unique_token = sorted(list(set([key for piece in self.all_pieces for key in piece.token_counter.keys() ])))
-      self.tokenizer = JeongganTokenizer(unique_token, feature_types=feature_types)
-      self.vocab = self.tokenizer.vocab
+    self._get_tokenizer(feature_types, tokenizer)
     self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
     
     self.feature_types = feature_types
@@ -230,6 +269,15 @@ class JeongganDataset:
     # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
 
     self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
+
+  def _get_tokenizer(self, feature_types, tokenizer:JeongganTokenizer=None):
+    if tokenizer:
+      self.tokenizer = tokenizer
+      self.vocab = tokenizer.vocab
+    else:
+      unique_token = sorted(list(set([key for piece in self.all_pieces for key in piece.token_counter.keys() ])))
+      self.tokenizer = JeongganTokenizer(unique_token, feature_types=feature_types)
+      self.vocab = self.tokenizer.vocab
 
   def __len__(self):
     return len(self.entire_segments)

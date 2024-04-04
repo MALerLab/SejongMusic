@@ -11,8 +11,7 @@ from sejong_music.yeominrak_processing import OrchestraScoreSeq, pack_collate
 from sejong_music.model_zoo import Seq2seq, QkvAttnSeq2seqOrch, get_emb_total_size, TransSeq2seq, JeongganTransSeq2seq
 from sejong_music.utils import convert_note_to_sampling, convert_onset_to_sustain_token, make_offset_set
 from sejong_music.sampling_utils import nucleus
-from sejong_music.constants import get_dynamic_template_for_orch, get_dynamic
-from sejong_music.jg_code import POSITION
+from sejong_music.constants import get_dynamic_template_for_orch, get_dynamic, POSITION
 
 
 class Inferencer:
