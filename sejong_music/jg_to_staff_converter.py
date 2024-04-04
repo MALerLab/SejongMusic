@@ -4,7 +4,7 @@ from collections import OrderedDict, Counter
 from typing import Any, List, Union, Tuple
 
 import music21
-from music21 import note as mnote, stream as mstream, meter as mmeter, key as mkey, pitch as mpitch
+from music21 import note as mnote, stream as stream, meter as mmeter, key as mkey, pitch as mpitch
 
 from .jg_code import POSITION, PITCH
 
@@ -811,7 +811,6 @@ class JeongganboParser:
   
   def __call__(self, token_str:str):
     sb_reader = SymbolReader()
-    jeonggans 
     for i, jeonggan in enumerate(piece.jeonggans):
       if i == 1920: # In Yeominlak, this is where the tempo changes
         sb_reader.handle_remaining_note(i)
