@@ -706,3 +706,6 @@ class BertTrainer(JeongganTrainer):
         
     return acc, acc, acc, validation_loss, num_tokens, loss_dict
   
+
+  def make_inference_result(self, write_png=True, loader=None):
+    return 0, 0, 0
