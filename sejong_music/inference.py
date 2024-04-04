@@ -441,9 +441,67 @@ def sequential_inference(model:Seq2seq, sample:torch.Tensor, decoder):
 
   return s
 
+class JGSimpleInferencer(JGInferencer):
+  def __init__(self, model: JeongganTransSeq2seq, 
+              is_condition_shifted: bool, 
+              is_orch: bool, 
+              temperature: float = 1, 
+              top_p: float = 1):
+    super().__init__(model, is_condition_shifted, is_orch, temperature=temperature, top_p=top_p)
+  
+  def get_start_token(self, inst:str):
+    return torch.LongTensor(self.tokenizer(['start', inst])).unsqueeze(0)
 
 
+  @torch.inference_mode()
+  def inference(self, src, inst_name:str, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
+    dev = self.device
+    src = src.to(dev)
 
+    # Setup for 0th step
+    # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
+    start_token = self.get_start_token(inst_name).to(dev)
+    assert src.ndim == 2 # sequence length, feature length
+
+    encoder_output: dict = self.model.run_encoder(src)
+
+    final_tokens = [start_token]
+    if prev_generation is not None:
+      final_tokens, current_gak_idx, encoder_output = self.model._apply_prev_generation(prev_generation, final_tokens, encoder_output)
+    selected_token = start_token
+
+    total_attention_weights = []
+    # while True:
+
+    for i in tqdm(range(500), leave=False):
+      
+      input_token = torch.cat(final_tokens, dim=0) if isinstance(self.model, JeongganTransSeq2seq) else selected_token
+      # print(input_token)
+      logit, encoder_output, attention_weight = self.model._run_inference_on_step(input_token, encoder_output)
+      selected_token = self.sampling_process(logit)
+      decoded_token = self.tokenizer.vocab[selected_token[0]]
+      if decoded_token == 'end': break
+      selected_token = torch.cat([selected_token, torch.LongTensor([self.tokenizer([inst_name])]).to(dev)], dim=1)
+      # print(selected_token)
+      final_tokens.append(selected_token)
+      total_attention_weights.append(attention_weight[0,:,0])
+      
+    if len(total_attention_weights) == 0:
+      attention_map = None
+    else:
+      attention_map = torch.stack(total_attention_weights, dim=1)
+    if isinstance(self.model, JeongganTransSeq2seq): final_tokens = final_tokens[1:]
+    cat_out = torch.cat(final_tokens, dim=0)
+    if isinstance(self.model, JeongganTransSeq2seq) and prev_generation is not None:
+      newly_generated = cat_out[len(prev_generation):]
+    else:
+      newly_generated = cat_out.clone()
+    if prev_generation is not None and not isinstance(self.model, JeongganTransSeq2seq):
+      cat_out = torch.cat([prev_generation[1:], cat_out], dim=0)
+    #  self.converter(src[1:-1]), self.converter(torch.cat(final_tokens, dim=0)), attention_map
+
+    return self._decode_inference_result(src, cat_out, (attention_map, cat_out, newly_generated))
+    
 
 if __name__ == "__main__":
   print("Inference Test!")

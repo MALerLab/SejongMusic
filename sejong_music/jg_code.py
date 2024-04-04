@@ -56,18 +56,18 @@ class JeongganPiece:
       token_counter.update(part)
     return token_counter
     
-  # @staticmethod
-  def split_and_filter(self, string, split_charater=' '):
+  @classmethod
+  def split_and_filter(cls, string, split_charater=' '):
     splited = string.split(split_charater)
     filtered = [x for x in splited if x != '']
-    filtered = self.filter_by_ignore_token(filtered)
+    filtered = cls.filter_by_ignore_token(filtered)
     return filtered
   
-  # @staticmethod
-  def filter_by_ignore_token(self, splited, ignore_token=['10', '뜰', '2', '3', '흘림표', '추성', '퇴성', '숨표'], position_token=POSITION):
+  @staticmethod
+  def filter_by_ignore_token(splited, ignore_token=['10', '뜰', '2', '3', '흘림표', '추성', '퇴성', '숨표'], position_token=POSITION):
     position_token = [x for x in position_token if x not in ['|', '\n']]
     filtered = []
-    prev_token = splited[0]
+    prev_token = splited[-1]
     for token in splited[::-1]:
       if token in ignore_token:
         prev_token = token
@@ -228,9 +228,9 @@ class JeongganDataset:
     self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
     
     if self.is_pos_counter:
-      self.feature_types = feature_types[0]+feature_types[-1]
-    else:
       self.feature_types = feature_types
+    else:
+      self.feature_types = [feature_types[0]]+[feature_types[-1]]
     # self.target_instrument = target_instrument
     # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
 
@@ -316,7 +316,8 @@ class JeongganDataset:
 
       source = [source_start_token] + expanded_source + [source_end_token]
       target = self.get_inst_and_position_feature(original_target, target_inst)
-      target = self.shift_condition(target)
+      if self.is_pos_counter:
+        target = self.shift_condition(target)
       shifted_target = target[1:]
       target = target[:-1]
       shifted_target = [x[0] for x in shifted_target]
@@ -335,3 +336,8 @@ class JeongganDataset:
     
     src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)          
     return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
+
+if __name__ == '__main__':
+  dataset = JeongganDataset(is_pos_counter=False)
+  print(len(dataset))
+  print(dataset[0])
