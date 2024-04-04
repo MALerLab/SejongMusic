@@ -122,7 +122,7 @@ def main(config: DictConfig):
                                 save_dir=inst_save_dir, 
                                 scheduler=scheduler, 
                                 use_fp16=(device=='cuda'),
-                                is_pos_enc = config.model.is_pos_enc)
+                                is_pos_counter = config.data.is_pos_counter)
     generator = Generator(config=None,
                           model=model,
                           output_dir=inst_save_dir,
