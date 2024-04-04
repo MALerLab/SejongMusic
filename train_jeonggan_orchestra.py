@@ -49,8 +49,6 @@ def main(config: DictConfig):
   dataset_class:Union[JeongganDataset, JGMaskedDataset] = getattr(jg_code, config.dataset_class)
   trainer_class:Union[JeongganTrainer, BertTrainer] = getattr(trainer_zoo, config.trainer_class)
   
-  if not hasattr(config, 'aug'):
-    config.aug = None
   
   train_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
                   # slice_measure_num = 2,
@@ -61,7 +59,8 @@ def main(config: DictConfig):
                   # max_meas=6,
                   # feature_types=['index', 'token', 'position'],
                   # target_instrument='daegeum'
-                  augment_param = config.aug
+                  augment_param = config.aug,
+                  num_max_inst = config.data.num_max_inst
                   )
   
   val_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
@@ -74,7 +73,8 @@ def main(config: DictConfig):
                   # feature_types=['index', 'token', 'position'],
                   # part_list = PART, position_token = POSITION, pitch_token = PITCH, 
                   # target_instrument=0,
-                  augment_param = config.aug
+                  augment_param = config.aug,
+                  num_max_inst = config.data.num_max_inst
                   )
     
   collate_fn = getattr(utils, config.collate_fn)

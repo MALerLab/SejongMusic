@@ -23,6 +23,7 @@ data:
   max_meas: 4
   sampling_rate: 2
   target_instrument: 0
+  num_max_inst: 4
 
 model:
   dim: 64
@@ -38,5 +39,7 @@ train:
   seed: 42
   num_workers: 8
   lr: 1e-3
+
+aug: null
 
 

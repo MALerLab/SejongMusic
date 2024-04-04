@@ -250,6 +250,7 @@ class JeongganDataset:
               jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '평조회상 가락덜이', '관악영산회상 염불도드리'],
               feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
               # target_instrument='daegeum',
+              num_max_inst:int=5,
               position_tokens=POSITION,
               piece_list:List[JeongganPiece]=None,
               tokenizer:JeongganTokenizer=None):
@@ -390,11 +391,13 @@ class JGMaskedDataset(JeongganDataset):
                position_tokens=POSITION, 
                augment_param:dict=None,
                piece_list: List[JeongganPiece] = None, 
-               tokenizer: JeongganTokenizer = None):
+               tokenizer: JeongganTokenizer = None,
+               num_max_inst:int=6):
     super().__init__(data_path, slice_measure_num, is_valid, False, False, jeonggan_valid_set, feature_types, position_tokens, piece_list, tokenizer)
     self.entire_segments = self.get_entire_segments()
     self.unique_pitches, self.unique_ornaments = self._get_unique_pitch_and_ornaments()
     self.augmentor = Augmentor(self.tokenizer, self.unique_pitches, self.unique_ornaments, **augment_param)
+    self.num_max_inst = num_max_inst
 
   def _get_unique_pitch_and_ornaments(self):
     unique_pitches = set()
@@ -450,9 +453,9 @@ class JGMaskedDataset(JeongganDataset):
   def __getitem__(self, idx):
     insts_of_piece = list(self.entire_segments[idx].keys())
     if self.is_valid:
-      insts = insts_of_piece
+      insts = insts_of_piece[:self.num_max_inst]
     else:
-      insts = random.sample(insts_of_piece, random.randint(1, len(insts_of_piece)))
+      insts = random.sample(insts_of_piece, random.randint(1, min(len(insts_of_piece), self.num_max_inst)))
 
     
     masked_src, org_src, loss_mask = self.get_processed_feature(insts, idx)          

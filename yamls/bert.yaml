@@ -22,6 +22,8 @@ data:
   max_meas: 4
   sampling_rate: 2
   target_instrument: 0
+  num_max_inst: 4
+
 
 model:
   dim: 64
@@ -33,7 +35,7 @@ model:
 train:
   batch_size: 16
   # total_iters: 25000
-  num_epoch: 600
+  num_epoch: 400
   seed: 42
   num_workers: 8
   lr: 1e-3
@@ -46,4 +48,11 @@ aug:
   mask_note_r: 0.15
   replace_note_r: 0.05
   erase_note_r: 0.05
+  # entire_orn_r: 0.0
+  # jg_r: 0.0
+  # frame_replace_r: 0.0
+  # frame_rand_r: 0.0
+  # mask_note_r: 0.1
+  # replace_note_r: 0.1
+  # erase_note_r: 0.0
 

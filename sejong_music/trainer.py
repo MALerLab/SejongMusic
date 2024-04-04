@@ -679,7 +679,7 @@ class BertTrainer(JeongganTrainer):
     src, org_src, loss_mask = batch
     src, org_src, loss_mask = src.to(self.device), org_src.to(self.device), loss_mask.to(self.device)
     if self.use_fp16:
-      with torch.cuda.amp.autocast():
+      with torch.cuda.amp.autocast(enabled=True):
         pred, attn_weight = self.model(src)
         loss = self.loss_fn(pred, org_src, loss_mask)
     else:
