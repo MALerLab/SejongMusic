@@ -5,6 +5,7 @@ gen_results/
 __pycache__/
 *.py[cod]
 *$py.class
+*.txt
 
 # C extensions
 *.so
