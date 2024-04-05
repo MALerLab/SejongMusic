@@ -252,15 +252,25 @@ class RollToJGConverter(JGConverter):
     notes = []
     prev_frame = 0
     for i, frame in enumerate(roll):
-      if frame[0] in ('start', 'end', 'pad', 'mask'): 
+      if frame[0] in ('start'): 
         prev_frame = i
+        continue
+      if frame[0] in ('end', 'mask', 'pad'):
+        prev_frame += 1
         continue
       if frame[0] in ('-', '비어있음') and frame[1] == '비어있음': continue
       if frame[0] != '-':
-        if notes: notes[-1].append(f'dur:{i-prev_frame}')
+        if notes: 
+          for j in range(1, 5):
+            if notes[-j][0] != '-':
+              notes[-j].append(f'dur:{i-prev_frame}')
+              break
+            else:
+              notes[-j].append(f'dur:{0}')
         prev_frame = i
       notes.append(frame)
     notes[-1].append(f'dur:{len(roll)-prev_frame}')
+
     return notes
   
   @staticmethod
@@ -296,10 +306,10 @@ class RollToJGConverter(JGConverter):
 
   
   def __call__(self, roll:List[List[str]]):
+    max_jg_per_gak = max([self.get_jg_idx(x) for x in roll if x[3][:3]=='jg:'])+1
     notes = self.extract_notes(copy.copy(roll))
     gak_ids = sorted(list(set([note[4] for note in notes])))
     out = []
-    max_jg_per_gak = max([self.get_jg_idx(x) for x in notes])+1
     for gak_id in gak_ids:
       gak_notes = [x for x in notes if x[4]==gak_id]
       conv_jgs = self.list_of_str_notes_to_jeonggan(gak_notes, max_jg_per_gak)

@@ -194,3 +194,19 @@ class Augmentor:
     else:
       raise ValueError("Invalid input shape")
     return masked, loss_mask
+  
+  def mask_except_note_onset(self, x:torch.Tensor):
+    if x.ndim == 2:
+      x = x.unsqueeze(-1)
+    assert x.ndim == 3 # (num_frame, num_feature, num_inst)
+    loss_mask = torch.ones_like(x, dtype=torch.long)
+    loss_mask[:, 2:] = 0
+    masked = x.clone()
+    masked[:, 0:2] = self.mask_id
+
+
+    frame_ids, inst_ids = torch.where(x[:,0,:] != self.sus_id)
+    note_pair = (frame_ids, torch.zeros_like(frame_ids), inst_ids)
+    masked[note_pair] = x[note_pair]
+    loss_mask[note_pair] = 0
+    return masked, loss_mask

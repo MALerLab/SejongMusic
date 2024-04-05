@@ -542,10 +542,10 @@ class JGToStaffConverter:
       
     pass
   
-  def convert_m21_notes_to_stream(self, notes:List[Note]):
+  def convert_m21_notes_to_stream(self, notes:List[Note], time_signature='3/8', key_signature=-4):
     stream = music21.stream.Stream()
-    stream.append(music21.meter.TimeSignature('3/8'))
-    current_key = music21.key.KeySignature(-4)
+    stream.append(music21.meter.TimeSignature(time_signature))
+    current_key = music21.key.KeySignature(key_signature)
     stream.append(current_key)
     for note in notes:
       for m21_note in note.m21_notes:
