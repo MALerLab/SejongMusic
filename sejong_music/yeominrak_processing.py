@@ -18,12 +18,12 @@ from .tokenizer import Tokenizer
 class AlignedScore:
   def __init__(self, xml_path='music_score/yeominlak.musicxml', 
               valid_measure_num = [i for i in range(93, 104)],
-              slice_measure_num = 2, 
+              slice_measure_num = 4, 
               is_valid = False, 
               use_pitch_modification=False, 
               pitch_modification_ratio=0.0, 
-              min_meas=3, 
-              max_meas=6,
+              min_meas=4, 
+              max_meas=4,
               feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'],
               sampling_rate=None,
               start_part_idx=0) -> None:
