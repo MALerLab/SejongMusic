@@ -11,7 +11,7 @@ import numpy as np
 
 from .jg_to_staff_converter import JGToStaffConverter, Note
 from .constants import POSITION, PITCH, PART, DURATION, BEAT
-
+from .utils import  as_fraction, FractionEncoder
 
 
 
@@ -206,10 +206,6 @@ class ABCPiece(JeongganPiece):
           total_tokens.append([orn, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
       total_tokens.append([note.duration, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
     total_tokens.append(['\n', f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
-    # for token in total_tokens:
-    #   if token[0]== None:
-        
-  
     return total_tokens
   
   def prepare_sliced_measure(self, slice_len=4):
@@ -229,7 +225,6 @@ class ABCPiece(JeongganPiece):
     return sliced_parts, sliced_by_measure
 
   def by_slice_len(self, part:str, slice_len:int):
-
     measure_boundary_idx = [0]+ [i+1 for i, cha in enumerate(part) if cha[0] == '\n']
     # measure_boundary_idx[10] == 10th measure's start index (count from 0)
     cutted_part = [self.cut(part, measure_boundary_idx, i, i+slice_len) for i in range(len(measure_boundary_idx)-slice_len)]
@@ -499,7 +494,7 @@ class ABCTokenizer:
         self.dur_vocab = DURATION
         self.note2token = {}
     
-    
+          
     # def __call__(self, note_feature:Union[List[str], str]):
     #     if isinstance(note_feature, list):
     #       return [self(x) for x in note_feature]
@@ -514,14 +509,15 @@ class ABCTokenizer:
         else:
           all_note_features.append(self.tok2idx[note])
       return all_note_features
-        
+
     def save_to_json(self, json_fn):
-        with open(json_fn, 'w') as f:
-            json.dump(self.vocab, f)
-    
+      with open(json_fn, 'w') as f:
+          json.dump(self.vocab, f, cls=FractionEncoder)
+          
     def load_from_json(self, json_fn):
         with open(json_fn, 'r') as f:
-            self.vocab = json.load(f)
+            self.vocab = json.load(f, object_hook=as_fraction)
+        print(self.vocab)
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }
         self.pred_vocab_size = self.vocab.index(PART[0])
         self.vocab_size_dict = {'total': len(self.vocab)}
@@ -641,5 +637,5 @@ class ABCDataset(JeongganDataset):
       condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, len(insts_of_piece)-2))
 
     
-    src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)          
+    src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)        
     return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
