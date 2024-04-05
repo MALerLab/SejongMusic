@@ -5,7 +5,7 @@ from typing import List, Set, Dict, Tuple, Union
 from fractions import Fraction
 from collections import defaultdict
 from .utils import  as_fraction, FractionEncoder
-
+import torch
 
 class Tokenizer:
     def __init__(self, parts, feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'], json_fn=None):
@@ -82,3 +82,39 @@ class Tokenizer:
         # feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx']
         # converted_lists = [self.tok2idx[self.key_types[i]][element] for i, element in enumerate(note_feature)]
         return converted_lists
+      
+      
+
+class SingleVocabTokenizer:
+    def __init__(self, unique_tokens, json_fn=None):
+        if json_fn:
+          self.load_from_json(json_fn)
+          return      
+
+        self.vocab = ['pad', 'start', 'end'] + sorted(list(set(unique_tokens)))
+        # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
+        self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
+        self.vocab_size_dict = {'total': len(self.vocab)}
+    
+    
+    def __call__(self, note_feature:Union[List[str], str]):
+        if isinstance(note_feature, list):
+          return [self(x) for x in note_feature]
+        return self.tok2idx[note_feature]      
+              
+    def save_to_json(self, json_fn):
+        with open(json_fn, 'w') as f:
+            json.dump(self.vocab, f, ensure_ascii=False)
+    
+    def load_from_json(self, json_fn):
+        with open(json_fn, 'r') as f:
+            self.vocab = json.load(f)
+        self.tok2idx = {value:i for i, value in enumerate(self.vocab) }
+        self.vocab_size_dict = {'total': len(self.vocab)}
+        
+    def decode(self, idx:Union[torch.Tensor, List[int], int]):
+        if isinstance(idx, torch.Tensor):
+          idx = idx.tolist()
+        if isinstance(idx, list):
+          return [self.decode(x) for x in idx]
+        return self.vocab[idx]
