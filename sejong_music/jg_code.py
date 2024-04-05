@@ -10,7 +10,7 @@ import torch
 import numpy as np
 
 from .jg_to_staff_converter import JGToStaffConverter, Note
-from .constants import POSITION, PITCH, PART
+from .constants import POSITION, PITCH, PART, DURATION, BEAT
 
 
 
@@ -172,36 +172,81 @@ class JeongganPiece:
 class ABCPiece(JeongganPiece):
   def __init__(self, txt_fn, gen_str=None, inst_list=None):
     super().__init__(txt_fn, gen_str, inst_list)
-    self.converter = JGToStaffConverter()
+    self.processed_tokens = self.get_abc_notes()
+    self.sliced_parts_by_inst, self.sliced_parts_by_measure = self.prepare_sliced_measure()
     
   def get_abc_notes(self):
-    notes = self.converter._convert_to_notes(self.tokenized_parts[0])
-    self.converter.get_duration_of_notes(notes)
-    total_tokens = []
-    for note in notes:
-      total_tokens.append(note.pitch)
-      total_tokens.append(note.duration)
-      if note.ornaments:
-        for orn in note.ornaments:
-          total_tokens.append(orn)
-    return total_tokens
+    abc_inst_parts = [JGToStaffConverter.convert_to_notes(part) for part in self.tokenized_parts]
+    for notes in abc_inst_parts:
+      JGToStaffConverter.get_duration_of_notes(notes) 
+    featured_notes = [self.make_features(notes) for notes in abc_inst_parts]
+    return featured_notes
 
-class ABCPiece(JeongganPiece):
-  def __init__(self, txt_fn, gen_str=None, inst_list=None):
-    super().__init__(txt_fn, gen_str, inst_list)
-    self.converter = JGToStaffConverter()
-    
-  def get_abc_notes(self):
-    notes = self.converter._convert_to_notes(self.tokenized_parts[0])
-    self.converter.get_duration_of_notes(notes)
+  # def count_token(self):
+  #   token_counter = Counter()
+  #   for part in self.processed_tokens:
+  #     tokens = [note[0] for note in part]
+  #     token_counter.update(tokens)
+  #   return token_counter
+  
+  def make_features(self, notes):
     total_tokens = []
+    prev_gak = notes[0].gak_offset
     for note in notes:
-      total_tokens.append(note.pitch)
-      total_tokens.append(note.duration)
+      if note.pitch == None or note.duration == None: #뭔지 확인하기
+        continue
+      if note.gak_offset != prev_gak:
+        num = note.gak_offset - prev_gak
+        for i in range(num):
+          total_tokens.append(['\n', f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset-num+i}"])
+        prev_gak = note.gak_offset
+      total_tokens.append([note.pitch, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])    
       if note.ornaments:
         for orn in note.ornaments:
-          total_tokens.append(orn)
+          total_tokens.append([orn, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
+      total_tokens.append([note.duration, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
+    total_tokens.append(['\n', f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
+    # for token in total_tokens:
+    #   if token[0]== None:
+        
+  
     return total_tokens
+  
+  def prepare_sliced_measure(self, slice_len=4):
+    if not self.is_clean:
+      return None, None
+    sliced_parts = {}
+    for inst, part in zip(self.inst_list, self.processed_tokens):
+      cutted_part = self.by_slice_len(part, slice_len)
+      sliced_parts[inst] = cutted_part
+    sliced_by_measure = []
+    
+    for i in range(len(cutted_part)):
+      # try:
+      sliced_by_measure.append({inst: cutted_part[i] for inst, cutted_part in sliced_parts.items()})
+      # except:
+      #   print(i, [len(part) for part in sliced_parts.values()])
+    return sliced_parts, sliced_by_measure
+
+  def by_slice_len(self, part:str, slice_len:int):
+
+    measure_boundary_idx = [0]+ [i+1 for i, cha in enumerate(part) if cha[0] == '\n']
+    # measure_boundary_idx[10] == 10th measure's start index (count from 0)
+    cutted_part = [self.cut(part, measure_boundary_idx, i, i+slice_len) for i in range(len(measure_boundary_idx)-slice_len)]
+    new_cutted_part = []
+    for phrase in cutted_part:
+      first_gak = int(phrase[0][-1][4:])
+      new_phrase = []
+      for note_features in phrase:
+        new_offset = int(note_features[-1][4:]) - first_gak
+        new_note = note_features[:-1] + [f"gak:{new_offset}"]
+        new_phrase.append(new_note)
+      new_cutted_part.append(new_phrase)
+    return new_cutted_part
+
+  # def replace_offset
+
+
 
 class JeongganTokenizer:
     def __init__(self, special_token, feature_types=['index', 'token', 'position'], is_roll=False, json_fn=None):
@@ -299,6 +344,7 @@ class JeongganDataset:
     else:
       texts = glob.glob(str(data_path / '*.txt'))
       all_pieces = [JeongganPiece(text) for text in texts]
+      # all_pieces = [ABCPiece(text) for text in texts]
       self.all_pieces = [x for x in all_pieces if x.is_clean]
 
     self._get_tokenizer(feature_types, tokenizer)
@@ -432,3 +478,168 @@ class JeongganDataset:
     src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)          
     return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
 
+class ABCTokenizer:
+    def __init__(self, special_token, feature_types=['token', 'beat_offset', 'jg_offset', 'gak_offset', 'inst'], is_roll=False, json_fn=None):
+        if json_fn:
+          self.load_from_json(json_fn)
+          return      
+        self.key_types = feature_types
+        existing_tokens = PITCH + DURATION
+        special_token = [token for token in special_token if token not in existing_tokens]
+        self.special_token = special_token
+        self.pred_vocab_size = len(existing_tokens+ special_token) + 3 # pad start end
+
+        self.vocab = ['pad', 'start', 'end'] + DURATION + PITCH + special_token + PART # + special_token]
+        self.vocab += [f'beat:{x}' for x in BEAT] # add beat position token
+        self.vocab += [f'jg:{i}' for i in range(20)] # add jg position
+        self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
+        # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
+        self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
+        self.vocab_size_dict = {'total': len(self.vocab)}
+        self.dur_vocab = DURATION
+        self.note2token = {}
+    
+    
+    # def __call__(self, note_feature:Union[List[str], str]):
+    #     if isinstance(note_feature, list):
+    #       return [self(x) for x in note_feature]
+    #     return self.tok2idx[note_feature]    
+              
+    def __call__(self, note_feature:Union[List[str]]):
+      all_note_features = []
+      for note in note_feature: 
+        if isinstance(note, list):
+          tokenized_note = [self.tok2idx[x] for x in note]
+          all_note_features.append(tokenized_note)
+        else:
+          all_note_features.append(self.tok2idx[note])
+      return all_note_features
+        
+    def save_to_json(self, json_fn):
+        with open(json_fn, 'w') as f:
+            json.dump(self.vocab, f)
+    
+    def load_from_json(self, json_fn):
+        with open(json_fn, 'r') as f:
+            self.vocab = json.load(f)
+        self.tok2idx = {value:i for i, value in enumerate(self.vocab) }
+        self.pred_vocab_size = self.vocab.index(PART[0])
+        self.vocab_size_dict = {'total': len(self.vocab)}
+        self.dur_vocab = DURATION
+        
+    def decode(self, idx:Union[torch.Tensor, List[int], int]):
+        if isinstance(idx, torch.Tensor):
+          idx = idx.tolist()
+        if isinstance(idx, list):
+          return [self.decode(x) for x in idx]
+        return self.vocab[idx]
+      
+class ABCDataset(JeongganDataset):
+  def __init__(self, data_path= Path('music_score/gen_code'),
+              slice_measure_num = 4,
+              is_valid=False,
+              use_pitch_modification=False,
+              pitch_modification_ratio=0.3,
+              # min_meas=3,
+              # max_meas=6,
+              jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '평조회상 가락덜이', '관악영산회상 염불도드리'],
+              feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
+              # target_instrument='daegeum',
+              position_tokens=POSITION,
+              piece_list:List[JeongganPiece]=None,
+              tokenizer:JeongganTokenizer=None, 
+              is_pos_counter=True):
+    super().__init__(data_path, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, jeonggan_valid_set, feature_types, position_tokens, piece_list, tokenizer, is_pos_counter)
+    if self.is_pos_counter:
+      self.feature_types = feature_types
+    else:
+      self.feature_types = [feature_types[0]]+[feature_types[-1]]
+      
+    if piece_list:
+      self.all_pieces = piece_list
+    else:
+      texts = glob.glob(str(data_path / '*.txt'))
+      # all_pieces = [JeongganPiece(text) for text in texts]
+      all_pieces = [ABCPiece(text) for text in texts]
+      self.all_pieces = [x for x in all_pieces if x.is_clean]
+
+    self._get_tokenizer(feature_types, tokenizer)
+    self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
+    
+
+    # self.target_instrument = target_instrument
+    # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
+
+    self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
+
+
+    self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
+    
+    if self.is_pos_counter:
+      self.feature_types = feature_types
+    else:
+      self.feature_types = [feature_types[0]]+[feature_types[-1]]
+    # self.target_instrument = target_instrument
+    # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
+
+    self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
+  
+  def _get_tokenizer(self, feature_types, tokenizer:JeongganTokenizer=None):
+    if tokenizer:
+      self.tokenizer = tokenizer
+      self.vocab = tokenizer.vocab
+    else:
+      unique_token = sorted(list(set([key for piece in self.all_pieces for key in piece.token_counter.keys() ])))
+      self.tokenizer = ABCTokenizer(unique_token, feature_types=feature_types)
+      self.vocab = self.tokenizer.vocab
+      
+  def get_processed_feature(self, condition_insts: List[str], target_inst: str, idx: int):
+      assert isinstance(condition_insts, list), "front_part_insts should be a list"
+      
+      source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(target_inst)
+      original_source = {inst: self.entire_segments[idx][inst] for inst in condition_insts}
+      original_target = self.entire_segments[idx][target_inst]
+      expanded_source = [token+[inst] for inst, tokens in original_source.items() for token in tokens]
+      expanded_target = [token+[target_inst] for token in original_target]
+      # expanded_source = [x for sublist in expanded_source for x in sublist]
+
+      source = [source_start_token] + expanded_source + [source_end_token]
+      # target = self.get_inst_and_position_feature(original_target, target_inst)
+      if self.is_pos_counter:
+        target = self.shift_condition(expanded_target)
+
+      shifted_target = target[1:]
+      target = target[:-1]
+      shifted_target = [x[0] for x in shifted_target]
+      return self.tokenizer(source), self.tokenizer(target), self.tokenizer(shifted_target)
+  
+  def shift_condition(self, note_list:List[List[str]]):
+      num_features = len(self.feature_types)
+      pred_features = ['start'] + [note[0] for note in note_list] # pred feature idx is 0
+      conditions = [note[1:] for note in note_list]
+
+      last_condition = []
+      last_tokens = {'inst': note_list[0][self.feature_types.index('inst')],
+                     'in_jg_position': 'beat:0', 
+                     'jg_offset': 'jg:0',
+                      'gak_offset': f'gak:{int(note_list[-1][self.feature_types.index("gak_offset")][4:])+1}'}
+      for feature in self.feature_types:
+        if feature == 'token': continue
+        last_condition.append(last_tokens[feature])
+      conditions = conditions +  [last_condition]
+      combined = [ [pred_features[i]] + conditions[i] for i in range(len(pred_features))] + [['end'] * num_features]
+      
+      return combined
+    
+  def __getitem__(self, idx):
+    insts_of_piece = list(self.entire_segments[idx].keys())
+    if self.is_valid:
+      target_instrument = insts_of_piece[0]
+      condition_instruments = insts_of_piece[1:]
+    else:
+      target_instrument = random.choice(insts_of_piece)
+      condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, len(insts_of_piece)-2))
+
+    
+    src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)          
+    return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
