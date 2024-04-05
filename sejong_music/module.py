@@ -28,6 +28,17 @@ class SumEmbedding(nn.Module):
   
   def forward(self, x):
     return torch.sum(torch.stack([module(x[..., i]) for i, module in enumerate(self.layers)], dim=-1), dim=-1)
+  
+
+class SumEmbeddingSingleVocab(nn.Module):
+  def __init__(self, vocab_size: int, emb_size: int) -> None:
+    super().__init__()
+    self.embedding = nn.Embedding(vocab_size, emb_size)
+  
+  def forward(self, x:torch.Tensor):
+    # x.shape: [batch, seq_len, num_features]
+    emb = self.embedding(x) # emb.shape: [batch, seq_len, num_features, emb_size]
+    return emb.sum(dim=-2) # emb.shape: [batch, seq_len, emb_size]
 
 class MultiEmbedding(nn.Module):
   def __init__(self, vocab_sizes: dict, vocab_param) -> None:

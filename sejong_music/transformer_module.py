@@ -92,9 +92,11 @@ class JeongganTransEncoder(nn.Module):
                                         num_heads=self.param.num_heads,
                                         attn_dropout=config.dropout,
                                         ff_dropout = config.dropout,
-                                        attn_flash=True
+                                        attn_flash=True,
+                                        
     )
-    self.encoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 2000)
+    if self.param.is_pos_enc:
+      self.encoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 2000)
     add_dropout_after_attn(self.layers, self.param.dropout)
     add_dropout_after_ff(self.layers, self.param.dropout)
     
@@ -108,7 +110,8 @@ class JeongganTransEncoder(nn.Module):
     '''
     mask = (x != 0)[..., -1] # squeeze num_features dimension
     embedding = self.embedding(x)
-    embedding += self.encoder_pos_enc(embedding)
+    if self.param.is_pos_enc:
+      embedding += self.encoder_pos_enc(embedding)
     return self.layers(embedding, mask=mask), mask
   
 class JeongganTransDecoder(nn.Module):
@@ -126,20 +129,24 @@ class JeongganTransDecoder(nn.Module):
                                         cross_attn_dropout = config.dropout,
                                         cross_attend=True,
                                         attn_flash=True)
-    self.decoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 1000)
+    if self.param.is_pos_enc:
+      self.decoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 1000)
     self._make_projection_layer()
     add_dropout_after_attn(self.layers, self.param.dropout)
     add_dropout_after_ff(self.layers, self.param.dropout)
 
-  def forward(self, x, enc_out, src_mask, return_logits=False):
+  def forward(self, x, enc_out, src_mask, return_logits=False, cache=None):
     mask = (x != 0)[..., -1]
     embedding = self.embedding(x)
-    embedding += self.decoder_pos_enc(embedding)
+    if self.param.is_pos_enc:
+      embedding += self.decoder_pos_enc(embedding)
+    if return_logits:
+      output, intermediates = self.layers(embedding, context=enc_out, mask=None, context_mask=src_mask, cache=cache, return_hiddens=True)
+      logit = self.proj(output)
+      return logit, intermediates
     output = self.layers(embedding, context=enc_out, mask=mask, context_mask=src_mask)
     logit = self.proj(output)
-    if return_logits:
-      return logit
-    dec_out = self._apply_softmax(logit)
+    dec_out = self._apply_log_softmax(logit)
     return dec_out
   
   def _make_projection_layer(self):
@@ -148,6 +155,9 @@ class JeongganTransDecoder(nn.Module):
 
   def _apply_softmax(self, logit):
     return torch.softmax(logit, dim=-1)
+
+  def _apply_log_softmax(self, logit):
+    return torch.log_softmax(logit, dim=-1)
   
   def _select_token(self, prob: torch.Tensor):
     tokens = []

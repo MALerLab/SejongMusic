@@ -797,21 +797,23 @@ class JeongganTransSeq2seq(Seq2seq):
   
   def _run_inference_on_step(self, final_tokens, encoder_output):
     enc_out, enc_mask = encoder_output['encode_out'], encoder_output['enc_mask']
-    logit = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    kv_cache = encoder_output['kv_cache']
+    # logit, _ = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    logit, encoder_output['kv_cache'] = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True, cache=kv_cache)
     return logit[:, -1:], encoder_output, torch.zeros_like(enc_out) # TODO: Return attention weights
 
   def run_encoder(self, src):
     assert src.ndim == 2
     enc_out, enc_mask = self.encoder(src.unsqueeze(0))
-    return {"encode_out": enc_out, "enc_mask": enc_mask}
+    return {"encode_out": enc_out, "enc_mask": enc_mask, 'kv_cache': None}
 
   def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output):
     dev = prev_generation.device
-    start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 3, 3, 5]]).to(dev)], dim=-1)
+    start_token = torch.cat([prev_generation[-1:, :1].to(dev),  torch.LongTensor([self.tokenizer(['prev\n', 'jg:0', 'gak:2'])]).to(dev), prev_generation[-1:, -1:] ], dim=-1)
     final_tokens = torch.cat([prev_generation, start_token], dim=0)
     current_measure_idx = 2
-
-    return [final_tokens[i:i+1] for i in range(len(final_tokens))], current_measure_idx, encoder_output
+    final_tokens = [final_tokens[i:i+1] for i in range(len(final_tokens))]
+    return final_tokens, current_measure_idx, encoder_output
 
   def shifted_inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
     dev = src.device
@@ -904,6 +906,37 @@ class JeongganTransSeq2seq(Seq2seq):
 
 
 
+class JeongganBERT(nn.Module):
+  def __init__(self, tokenizer, config):
+    super().__init__()
+    self.tokenizer = tokenizer
+    self.converter = tokenizer
+    self.vocab_size = len(tokenizer.vocab)
+    self.pred_vocab_size = tokenizer.pred_vocab_size
+    self.config = config
+
+    self.encoder = JeongganTransEncoder(self.vocab_size, self.config)
+    self.proj = nn.Linear(config.dim, self.pred_vocab_size * 2)
+    self.pred_vocab_size = self.pred_vocab_size
+    self.is_condition_shifted = False
+    
+  
+  def forward(self, src:torch.Tensor):
+    enc_out, _ = self.encoder(src)
+    logit = self.proj(enc_out)
+    return logit.reshape(logit.shape[0], logit.shape[1], 2, self.pred_vocab_size), None
+  
+  def _run_inference_on_step(self, final_tokens, encoder_output):
+    enc_out, enc_mask = encoder_output['encode_out'], encoder_output['enc_mask']
+    kv_cache = encoder_output['kv_cache']
+    # logit, _ = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True)
+    logit, encoder_output['kv_cache'] = self.decoder(final_tokens.unsqueeze(0), enc_out, enc_mask, return_logits=True, cache=kv_cache)
+    return logit[:, -1:], encoder_output, torch.zeros_like(enc_out) # TODO: Return attention weights
+
+  def run_encoder(self, src):
+    assert src.ndim == 2
+    enc_out, enc_mask = self.encoder(src.unsqueeze(0))
+    return {"encode_out": enc_out, "enc_mask": enc_mask, 'kv_cache': None}
 
 
 

@@ -95,18 +95,23 @@ def apply_tie_but_measure_split(notes: List[music21.note.Note], part_idx) -> Lis
         previous_measure = note.measureNumber
     return tied_notes
 
-def apply_tie(notes: List[music21.note.Note], part_idx) -> List[music21.note.Note]:
+def apply_tie(notes: List[music21.note.Note], part_idx:int) -> List[music21.note.Note]:
     tied_notes = []
     for note in notes:
         if note.tie is not None:
             if note.tie.type == 'start':
                 tied_notes.append(Gnote(note, part_idx))
+            elif len(tied_notes) == 0:
+                continue
+                # tied_notes.append(Gnote(music21.note.Rest(duration=note.duration), part_idx))
             elif note.tie.type == 'continue':
                 tied_notes[-1] +=  note
             elif note.tie.type == 'stop':
                 tied_notes[-1] += note
             else:
                 raise ValueError(f'Unknown tie type: {note.tie.type}')
+        elif note.isRest and len(tied_notes) > 0 and tied_notes[-1].pitch == 0:
+            tied_notes[-1] += note
         else:
             tied_notes.append(Gnote(note, part_idx))
         
@@ -417,5 +422,9 @@ def convert_note_to_sampling(measure, dynamic_templates, beat_sampling_num = 6):
   return new_measure
 
 def convert_onset_to_sustain_token(roll_array: np.ndarray):
-  roll_array[roll_array[:,2]!=1, 1] = 0
-  return roll_array[:, [0,1,3,4]]
+    roll_array[roll_array[:,2]!=1, 1] = 0
+    return roll_array[:, [0,1,3,4]]
+
+def read_txt(path):
+    with open(path, 'r') as file:
+        return file.read()
