@@ -5,8 +5,7 @@ from typing import List, Set, Dict, Tuple, Union
 from fractions import Fraction
 from collections import defaultdict
 from .utils import  as_fraction, FractionEncoder
-from .constants import POSITION, PITCH
-
+import torch
 
 class Tokenizer:
     def __init__(self, parts, feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx'], json_fn=None):
@@ -83,26 +82,39 @@ class Tokenizer:
         # feature_types=['index', 'pitch', 'duration', 'offset', 'dynamic', 'measure_idx']
         # converted_lists = [self.tok2idx[self.key_types[i]][element] for i, element in enumerate(note_feature)]
         return converted_lists
+      
+      
 
+class SingleVocabTokenizer:
+    def __init__(self, unique_tokens, json_fn=None):
+        if json_fn:
+          self.load_from_json(json_fn)
+          return      
 
-class JeongganTokenizer:
-    def __init__(self, parts, feature_types=['instrument', 'token', 'position'], pitch_token=PITCH, position_token=POSITION):
-        self.parts = parts
-        self.key_types = feature_types
-        vocab_list = defaultdict(list)
-        special_token = sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in pitch_token + position_token+ ['|']])
-        vocab_list['instrument'] = [i for i in range(len(self.parts)+1)]
-        vocab_list['token'] = ['start', 'end'] + ['|', '\n'] + pitch_token + position_token + special_token
-        vocab_list['position'] = ['start', 'end'] + position_token
-        self.vocab = vocab_list
-        self.tok2idx = {key: {k:i for i, k in enumerate(value)} for key, value in self.vocab.items() }  
-        self.note2token = {}  
+        self.vocab = ['pad', 'start', 'end'] + sorted(list(set(unique_tokens)))
+        # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
+        self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
+        self.vocab_size_dict = {'total': len(self.vocab)}
     
-    def hash_note_feature(self, note_feature):
-        assert isinstance(note_feature, list)
-        out = [self.tok2idx[self.key_types[i]][element] for i, element in enumerate(note_feature)]
-        return out
+    
+    def __call__(self, note_feature:Union[List[str], str]):
+        if isinstance(note_feature, list):
+          return [self(x) for x in note_feature]
+        return self.tok2idx[note_feature]      
+              
+    def save_to_json(self, json_fn):
+        with open(json_fn, 'w') as f:
+            json.dump(self.vocab, f, ensure_ascii=False)
+    
+    def load_from_json(self, json_fn):
+        with open(json_fn, 'r') as f:
+            self.vocab = json.load(f)
+        self.tok2idx = {value:i for i, value in enumerate(self.vocab) }
+        self.vocab_size_dict = {'total': len(self.vocab)}
         
-    def __call__(self, note_feature:List[Union[int, float, str]]):  
-        converted_lists = self.hash_note_feature(note_feature)
-        return converted_lists
+    def decode(self, idx:Union[torch.Tensor, List[int], int]):
+        if isinstance(idx, torch.Tensor):
+          idx = idx.tolist()
+        if isinstance(idx, list):
+          return [self.decode(x) for x in idx]
+        return self.vocab[idx]

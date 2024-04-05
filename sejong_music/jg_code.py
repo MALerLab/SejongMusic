@@ -205,7 +205,7 @@ class JeongganTokenizer:
               
     def save_to_json(self, json_fn):
         with open(json_fn, 'w') as f:
-            json.dump(self.vocab, f)
+            json.dump(self.vocab, f, ensure_ascii=False)
     
     def load_from_json(self, json_fn):
         with open(json_fn, 'r') as f:
