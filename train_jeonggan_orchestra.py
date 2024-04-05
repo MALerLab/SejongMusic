@@ -142,7 +142,7 @@ def main(config: DictConfig):
     with open(inst_save_dir / 'cph_omr.txt', 'w') as f:
       f.write(jg_omr_str)
     
-    notes, score = generator.jg_to_staff_converter(output_str)
+    notes, score = generator.jg_to_staff_converter.convert_multi_track(output_str)
 
     score.write('musicxml', inst_save_dir / 'cph_gen.musicxml')
 

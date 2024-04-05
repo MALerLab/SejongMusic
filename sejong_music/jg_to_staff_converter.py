@@ -6,7 +6,7 @@ from typing import Any, List, Union, Tuple
 import music21
 from music21 import note as mnote, stream as stream, meter as mmeter, key as mkey, pitch as mpitch
 
-from .jg_code import POSITION, PITCH
+from .constants import POSITION, PITCH
 
 
 class JGCodeToOMRDecoder:
@@ -159,21 +159,26 @@ class Note:
                         ':21': Fraction(2, 9),
                         ':22': Fraction(5, 9),
                         ':23': Fraction(8, 9)}
-  def __init__(self, pitch:List[str], pos:str, jg_offset:int) -> None:
+  def __init__(self, pitch:List[str], pos:str, global_jg_offset:int, jg_offset:int, gak_offset:int) -> None:
     assert type(pitch) == list
     self.pitch = pitch[0]
     self.pos = pos
+    self.global_jg_offset = global_jg_offset
     self.jg_offset = jg_offset
+    self.gak_offset = gak_offset
     self.ornaments = pitch[1:]
     self.duration = None
     self.midi_pitch = None
     self.m21_notes = []
   def __repr__(self) -> str:
-    return f"Note {self.pitch}({self.midi_pitch})_{'_'.join(self.ornaments)} {self.pos} @ {self.jg_offset}+{self.beat_offset} / {self.duration}"
+    return f"Note {self.pitch}({self.midi_pitch})_{'_'.join(self.ornaments)} {self.pos} @ {self.global_jg_offset}+{self.beat_offset} / {self.duration}"
   
   @property
   def beat_offset(self):
-    return self.pos_to_beat_offset[self.pos]
+    try:
+      return self.pos_to_beat_offset[self.pos]
+    except:
+      print(f"Unknown pos {self.pos}, {self.pitch}, {self.ornaments}, {self.global_jg_offset}")
   
   @property
   def int_pos(self):
@@ -181,7 +186,7 @@ class Note:
   
   @property
   def offset(self):
-    return self.jg_offset + self.beat_offset
+    return self.global_jg_offset + self.beat_offset
   
   
 
@@ -209,8 +214,8 @@ class ThreeColumnDetector:
     return False
 
   def __call__(self, note:Note):
-    if self.cur_jg_offset != note.jg_offset:
-      self.cur_jg_offset = note.jg_offset
+    if self.cur_jg_offset != note.global_jg_offset:
+      self.cur_jg_offset = note.global_jg_offset
       self.pos_in_cur_jg = []
     if self._check_note_in_three_col_middle(note):
       note.pos = f':{16+self.pos2column[note.pos]}'
@@ -326,27 +331,35 @@ class JGToStaffConverter:
     self.dur_ratio = dur_ratio
 
   @staticmethod
-  def _append_note(prev_note, prev_pos, jg_offset, total_notes):
+  def _append_note(prev_note, prev_pos, global_jg_offset, jg_offset, gak_offset, total_notes):
     if prev_note:
-      total_notes.append(Note(prev_note, prev_pos, jg_offset))
+      total_notes.append(Note(prev_note, prev_pos, global_jg_offset, jg_offset, gak_offset))
     return []
   
-  def _convert_to_notes(self, tokens:List[str]):
+  @classmethod
+  def convert_to_notes(cls, tokens:List[str]):
+    global_jg_offset = 0
     jg_offset = 0
+    gak_offset = 0
     prev_pos = None
     prev_note = []
     total_notes = []
     for token in tokens:
       if token == '' or token in ('pad', 'start', 'end'): continue
-      if token in self.pos_tokens:
-        prev_note = self._append_note(prev_note, prev_pos, jg_offset, total_notes)
+      if token in cls.pos_tokens:
+        prev_note = cls._append_note(prev_note, prev_pos, global_jg_offset, jg_offset, gak_offset, total_notes)
         prev_pos = token
       elif token in ('|', '\n'):
-        prev_note = self._append_note(prev_note, prev_pos, jg_offset, total_notes)
-        jg_offset += 1
+        prev_note = cls._append_note(prev_note, prev_pos, global_jg_offset, jg_offset, gak_offset, total_notes)
+        global_jg_offset += 1
+        if token == '\n':
+          jg_offset = 0
+          gak_offset += 1
+        else:
+          jg_offset += 1
       else:
         prev_note.append(token)
-    prev_note = self._append_note(prev_note, prev_pos, jg_offset, total_notes)
+    prev_note = cls._append_note(prev_note, prev_pos, global_jg_offset, jg_offset, gak_offset, total_notes)
     return total_notes
 
   def _fix_three_col_division(self, notes:List[Note]):
@@ -354,7 +367,8 @@ class JGToStaffConverter:
     for note in notes:
       three_col_detector(note)
 
-  def get_duration_of_notes(self, notes:List[Note]):
+  @staticmethod
+  def get_duration_of_notes(notes:List[Note]):
     filtered_notes = [note for note in notes if (note.pitch != '-' or '노니로' in note.ornaments)]
     for i, note in enumerate(filtered_notes[:-1]):
       note.duration = filtered_notes[i+1].offset - note.offset
@@ -566,7 +580,7 @@ class JGToStaffConverter:
     if isinstance(tokens, str):
       tokens = tokens.split(' ')
 
-    notes = self._convert_to_notes(tokens)
+    notes = self.convert_to_notes(tokens)
     scale = self.parse_scale(scale)
     if scale is None:
       scale, exceptional_pitches = self.get_scale(notes)
