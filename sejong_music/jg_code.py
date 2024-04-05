@@ -133,14 +133,12 @@ class JeongganPiece:
       outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, 4] = f'gak:{i}'
       cur_idx += num_jg*num_frame_per_jg
 
-
     for note in notes:
       jg_offset, beat_offset, duration = note.global_jg_offset, note.beat_offset, note.duration
       if duration is None:
         duration = 0
       start_frame = round((jg_offset + beat_offset) * num_frame_per_jg)
       end_frame = max(round((jg_offset + beat_offset + duration) * num_frame_per_jg), start_frame+1)
-
       outputs[start_frame, 0] = note.pitch
       outputs[start_frame+1:end_frame, 0] = '-'
       if note.ornaments:
@@ -389,11 +387,11 @@ class JGMaskedDataset(JeongganDataset):
                jeonggan_valid_set=['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '평조회상 가락덜이', '관악영산회상 염불도드리'], 
                feature_types=['token', 'ornaments', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'], 
                position_tokens=POSITION, 
-               augment_param:dict=None,
+               augment_param:dict={},
                piece_list: List[JeongganPiece] = None, 
                tokenizer: JeongganTokenizer = None,
                num_max_inst:int=6):
-    super().__init__(data_path, slice_measure_num, is_valid, False, False, jeonggan_valid_set, feature_types, position_tokens, piece_list, tokenizer)
+    super().__init__(data_path, slice_measure_num, is_valid, False, False, jeonggan_valid_set=jeonggan_valid_set, feature_types=feature_types, position_tokens=position_tokens, piece_list=piece_list, tokenizer=tokenizer, num_max_inst=num_max_inst)
     self.entire_segments = self.get_entire_segments()
     self.unique_pitches, self.unique_ornaments = self._get_unique_pitch_and_ornaments()
     self.augmentor = Augmentor(self.tokenizer, self.unique_pitches, self.unique_ornaments, **augment_param)

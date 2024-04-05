@@ -155,3 +155,42 @@ class Augmentor:
       self.mask_entire_ornaments(x)
     
     return x, loss_mask
+
+  def mask_every_start_beat(self, x:torch.Tensor):
+    if x.ndim == 2:
+      x = x.unsqueeze(-1)
+    assert x.ndim == 3 # (num_frame, num_feature, num_inst)
+    loss_mask = torch.zeros_like(x, dtype=torch.long)
+    if x.shape[0] % self.num_beat == 0:
+      x[::self.num_beat, 0:2] = self.mask_id
+      loss_mask[::self.num_beat, 0:2] = 1
+    elif (x.shape[0]-2) % self.num_beat == 0: # start and end token appended
+      x[1::self.num_beat, 0:2] = self.mask_id
+      loss_mask[1::self.num_beat, 0:2] = 1
+    else:
+      raise ValueError("Invalid input shape")
+    return x, loss_mask
+  
+  def mask_except_start_beat(self, x:torch.Tensor):
+    if x.ndim == 2:
+      x = x.unsqueeze(-1)
+    assert x.ndim == 3 # (num_frame, num_feature, num_inst)
+    loss_mask = torch.ones_like(x, dtype=torch.long)
+    loss_mask[:, 2:] = 0
+    masked = x.clone()
+    masked[:, 0:2] = self.mask_id
+    
+    if x.shape[0] % self.num_beat == 0:
+      masked[::self.num_beat, 0:2] = x[::self.num_beat, 0:2]
+      loss_mask[::self.num_beat, 0:2] = 0
+    elif (x.shape[0]-2) % self.num_beat == 0: # start and end token appended
+      # x[1::self.num_beat, 0:2] = self.mask_id
+      masked[1::self.num_beat, 0:2] = x[1::self.num_beat, 0:2]
+      loss_mask[1::self.num_beat, 0:2] = 0
+      masked[0] = x[0]
+      masked[-1] = x[-1]
+      loss_mask[0] = 0
+      loss_mask[-1] = 0
+    else:
+      raise ValueError("Invalid input shape")
+    return masked, loss_mask

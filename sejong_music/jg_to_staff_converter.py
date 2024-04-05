@@ -360,6 +360,7 @@ class JGToStaffConverter:
       else:
         prev_note.append(token)
     prev_note = cls._append_note(prev_note, prev_pos, global_jg_offset, jg_offset, gak_offset, total_notes)
+    total_notes[-1].duration = max(global_jg_offset - total_notes[-1].global_jg_offset, 1) - total_notes[-1].beat_offset
     return total_notes
 
   def _fix_three_col_division(self, notes:List[Note]):
@@ -372,7 +373,8 @@ class JGToStaffConverter:
     filtered_notes = [note for note in notes if (note.pitch != '-' or '노니로' in note.ornaments)]
     for i, note in enumerate(filtered_notes[:-1]):
       note.duration = filtered_notes[i+1].offset - note.offset
-    filtered_notes[-1].duration = 1 - filtered_notes[-1].beat_offset
+    if filtered_notes[-1].duration is None:
+      filtered_notes[-1].duration = 1 - filtered_notes[-1].beat_offset
   
   def make_m21_note(self, pitch:int, duration:float, grace:bool=False):
     if isinstance(pitch, str):

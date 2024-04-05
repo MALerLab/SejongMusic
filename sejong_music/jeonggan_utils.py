@@ -1,4 +1,5 @@
 from typing import List
+import copy
 import music21
 
 from .utils import apply_tie, Gnote
@@ -237,3 +238,71 @@ class GencodeConverter:
   def reverse_convert(self, gencode):
     return
 
+
+class RollToJGConverter(JGConverter):
+  PITCH2MIDI = JGConverter.define_pitch2midi()
+  MIDI2PITCH = {v:k for k,v in PITCH2MIDI.items()}
+
+  def __init__(self, jql=1.5):
+    self.jql=jql
+    pass
+
+  @staticmethod
+  def extract_notes(roll):
+    notes = []
+    prev_frame = 0
+    for i, frame in enumerate(roll):
+      if frame[0] in ('start', 'end', 'pad', 'mask'): 
+        prev_frame = i
+        continue
+      if frame[0] in ('-', '비어있음') and frame[1] == '비어있음': continue
+      if frame[0] != '-':
+        if notes: notes[-1].append(f'dur:{i-prev_frame}')
+        prev_frame = i
+      notes.append(frame)
+    notes[-1].append(f'dur:{len(roll)-prev_frame}')
+    return notes
+  
+  @staticmethod
+  def get_jg_idx(note:List[str]):
+    return int(note[3][3:])
+  
+  @staticmethod
+  def get_beat_offset(note:List[str]):
+    return int(note[2][5:])/6* 1.5
+  
+  @staticmethod
+  def get_duration(note:List[str]):
+    return int(note[6][4:])/6 * 1.5
+  
+  @staticmethod
+  def make_pitch_orn_string(note:List[str]):
+    pitch = note[0]
+    ornament = note[1]
+    if ornament=='비어있음':
+      return pitch
+    return f'{pitch}_{ornament}'
+  
+  def list_of_str_notes_to_jeonggan(self, notes:List[List[str]], max_jg_per_gak:int): 
+    conv_jgs = [[] for _ in range(max_jg_per_gak)]
+    # if len(sel_meas) != 0 and sel_meas[0].pitch == 0:
+    #   sel_meas = sel_meas[1:]
+    for note in notes:
+      cur_jg = conv_jgs[self.get_jg_idx(note)]
+      jg_offset = self.get_beat_offset(note)
+      cur_jg.append((self.make_pitch_orn_string(note), self.get_duration(note), jg_offset))
+      # cur_jg.append(((self.MIDI2PITCH[note.pitch.midi]), note.duration.quarterLength, jg_offset))
+    return conv_jgs
+
+  
+  def __call__(self, roll:List[List[str]]):
+    notes = self.extract_notes(copy.copy(roll))
+    gak_ids = sorted(list(set([note[4] for note in notes])))
+    out = []
+    max_jg_per_gak = max([self.get_jg_idx(x) for x in notes])+1
+    for gak_id in gak_ids:
+      gak_notes = [x for x in notes if x[4]==gak_id]
+      conv_jgs = self.list_of_str_notes_to_jeonggan(gak_notes, max_jg_per_gak)
+      text_jgs = self.jeonggan_note_to_text(conv_jgs)
+      out.append('|'.join(text_jgs))
+    return '\n'.join(out)
