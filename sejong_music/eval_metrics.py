@@ -12,7 +12,7 @@ def per_jg_note_acc(pred, gt, inst, tokenizer,
   Args:
     pred(List[int]): list of token indices.
     gt(List[int]): list of token indices.
-    inst(str): list of instruments.
+    inst(str): current instrument.
     tokenizer(JeongganTokenizer): tokenizer from current dataset.
     num_frame_per_jg(int): number of beat frames per jeonggan.
     strict(bool): If True, onsets need to be in the same beat position to be considered correct.
@@ -61,7 +61,7 @@ def onset_f1(pred, gt, inst, tokenizer,
   Args:
     pred(List[int]): list of token indices.
     gt(List[int]): list of token indices.
-    inst(str): list of instruments.
+    inst(str): current instrument.
     tokenizer(JeongganTokenizer): tokenizer from current dataset.
     num_frame_per_jg(int): number of beat frames per jeonggan.
     pitch_only(bool): If True, ornamentations in note positions are ignored.
