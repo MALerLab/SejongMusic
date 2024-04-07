@@ -95,7 +95,8 @@ class JeongganTransEncoder(nn.Module):
                                         attn_flash=True,
                                         
     )
-    self.encoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 2000)
+    if self.param.is_pos_enc:
+      self.encoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 2000)
     add_dropout_after_attn(self.layers, self.param.dropout)
     add_dropout_after_ff(self.layers, self.param.dropout)
     
@@ -128,7 +129,8 @@ class JeongganTransDecoder(nn.Module):
                                         cross_attn_dropout = config.dropout,
                                         cross_attend=True,
                                         attn_flash=True)
-    self.decoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 1000)
+    if self.param.is_pos_enc:
+      self.decoder_pos_enc = AbsolutePositionalEmbedding(config.dim, 1000)
     self._make_projection_layer()
     add_dropout_after_attn(self.layers, self.param.dropout)
     add_dropout_after_ff(self.layers, self.param.dropout)

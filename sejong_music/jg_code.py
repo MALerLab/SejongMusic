@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import List, Set, Dict, Tuple, Union
 from collections import defaultdict, Counter
 from pathlib import Path
+from tqdm.auto import tqdm
 import torch
 import numpy as np
 
 from .jg_to_staff_converter import JGToStaffConverter, Note
 from .constants import POSITION, PITCH, PART, DURATION, BEAT
 from .utils import  as_fraction, FractionEncoder
+from .mlm_utils import Augmentor
 
 
 
@@ -131,14 +133,12 @@ class JeongganPiece:
       outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, 4] = f'gak:{i}'
       cur_idx += num_jg*num_frame_per_jg
 
-
     for note in notes:
       jg_offset, beat_offset, duration = note.global_jg_offset, note.beat_offset, note.duration
       if duration is None:
         duration = 0
       start_frame = round((jg_offset + beat_offset) * num_frame_per_jg)
       end_frame = max(round((jg_offset + beat_offset + duration) * num_frame_per_jg), start_frame+1)
-
       outputs[start_frame, 0] = note.pitch
       outputs[start_frame+1:end_frame, 0] = '-'
       if note.ornaments:
@@ -252,13 +252,16 @@ class JeongganTokenizer:
         existing_tokens = POSITION + PITCH
         special_token = [token for token in special_token if token not in existing_tokens]
         self.special_token = special_token
-        self.pred_vocab_size = len(existing_tokens+ special_token) + 3 # pad start end
 
-        self.vocab = ['pad', 'start', 'end'] + POSITION + PITCH + special_token + PART # + special_token]
         if is_roll:
+          self.vocab = ['pad', 'start', 'end'] + PITCH + special_token
+          self.pred_vocab_size = len(self.vocab) # pad start end
+          self.vocab += PART
           self.vocab += ['mask']
           self.vocab += [f'beat:{i}' for i in range(6)]
         else:
+          self.pred_vocab_size = len(existing_tokens+ special_token) + 3 # pad start end
+          self.vocab = ['pad', 'start', 'end'] + POSITION + PITCH + special_token + PART # + special_token]
           self.vocab += [f'prev{x}' for x in POSITION] # add prev position token
         self.vocab += [f'jg:{i}' for i in range(20)] # add jg position
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
@@ -276,7 +279,7 @@ class JeongganTokenizer:
               
     def save_to_json(self, json_fn):
         with open(json_fn, 'w') as f:
-            json.dump(self.vocab, f)
+            json.dump(self.vocab, f, ensure_ascii=False)
     
     def load_from_json(self, json_fn):
         with open(json_fn, 'r') as f:
@@ -319,6 +322,8 @@ class JeongganDataset:
               jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '평조회상 가락덜이', '관악영산회상 염불도드리'],
               feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
               # target_instrument='daegeum',
+              num_max_inst:int=5,
+              augment_param=None,
               position_tokens=POSITION,
               piece_list:List[JeongganPiece]=None,
               tokenizer:JeongganTokenizer=None, 
@@ -529,7 +534,6 @@ class ABCTokenizer:
         if isinstance(idx, list):
           return [self.decode(x) for x in idx]
         return self.vocab[idx]
-      
 class ABCDataset(JeongganDataset):
   def __init__(self, data_path= Path('music_score/gen_code'),
               slice_measure_num = 4,
@@ -638,4 +642,82 @@ class ABCDataset(JeongganDataset):
 
     
     src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)        
-    return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
+    return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)    
+class JGMaskedDataset(JeongganDataset):
+  def __init__(self, data_path='music_score/gen_code', 
+               slice_measure_num=4, 
+               is_valid=False, 
+               jeonggan_valid_set=['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '평조회상 가락덜이', '관악영산회상 염불도드리'], 
+               feature_types=['token', 'ornaments', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'], 
+               position_tokens=POSITION, 
+               augment_param:dict={},
+               piece_list: List[JeongganPiece] = None, 
+               tokenizer: JeongganTokenizer = None,
+               num_max_inst:int=6):
+    super().__init__(data_path, slice_measure_num, is_valid, False, False, jeonggan_valid_set=jeonggan_valid_set, feature_types=feature_types, position_tokens=position_tokens, piece_list=piece_list, tokenizer=tokenizer, num_max_inst=num_max_inst)
+    self.entire_segments = self.get_entire_segments()
+    self.unique_pitches, self.unique_ornaments = self._get_unique_pitch_and_ornaments()
+    self.augmentor = Augmentor(self.tokenizer, self.unique_pitches, self.unique_ornaments, **augment_param)
+    self.num_max_inst = num_max_inst
+
+  def _get_unique_pitch_and_ornaments(self):
+    unique_pitches = set()
+    unique_ornaments = set()
+    for seg in self.entire_segments:
+      for inst, roll in seg.items():
+        pitches = [x[0] for x in roll]
+        ornaments = [x[1] for x in roll]
+        unique_pitches.update(set(pitches))
+        unique_ornaments.update(set(ornaments))
+    return sorted(list(unique_pitches)), sorted(list(unique_ornaments))
+  
+  def _get_tokenizer(self, feature_types, tokenizer:JeongganTokenizer=None):
+    if tokenizer:
+      self.tokenizer = tokenizer
+      self.vocab = tokenizer.vocab
+    else:
+      unique_token = sorted(list(set([key for piece in self.all_pieces for key in piece.token_counter.keys() ]))) + ['비어있음', 'mask']
+      self.tokenizer = JeongganTokenizer(unique_token, feature_types=feature_types, is_roll=True)
+      self.vocab = self.tokenizer.vocab
+  
+  def get_entire_segments(self):
+    entire_segments = []
+    for piece in tqdm(self.all_pieces, desc='Converting segments to roll...'):
+      entire_segments += self._get_roll_by_part(piece.sliced_parts_by_measure)
+    return entire_segments
+  
+  def _get_roll_by_part(self, sliced_parts_by_measure:List[Dict[str, List[str]]]):
+    return [{inst: JeongganPiece.convert_tokens_to_roll(tokens, inst) for inst, tokens in meas_data.items()} for meas_data in sliced_parts_by_measure]
+
+  def prepare_special_tokens(self):
+    source_start_token = ['start'] * len(self.feature_types)
+    source_end_token =  ['end'] * len(self.feature_types)
+    return torch.LongTensor(self.tokenizer(source_start_token)), torch.LongTensor(self.tokenizer(source_end_token))
+
+  def get_processed_feature(self, selected_insts: List[str], idx:int):
+    start_token, end_token = self.prepare_special_tokens()
+
+    x = self.tokenizer([x.tolist() for inst, x in self.entire_segments[idx].items() if inst in selected_insts])
+    x = torch.LongTensor(x).permute(1,2,0)
+    correct_x = x.clone()
+    x, loss_mask = self.augmentor(x)
+
+    x = x.permute(2,0,1).flatten(0,1)
+    loss_mask = loss_mask.permute(2,0,1).flatten(0,1)
+    loss_mask = loss_mask[:,:2]
+    correct_x = correct_x.permute(2,0,1).flatten(0,1)
+    x = torch.cat([start_token.unsqueeze(0), x, end_token.unsqueeze(0)])
+    correct_x = torch.cat([start_token.unsqueeze(0), correct_x, end_token.unsqueeze(0)])
+    loss_mask = torch.cat([torch.zeros(1, 2), loss_mask, torch.zeros(1,2)])
+    return x, correct_x, loss_mask
+  
+  def __getitem__(self, idx):
+    insts_of_piece = list(self.entire_segments[idx].keys())
+    if self.is_valid:
+      insts = insts_of_piece[:self.num_max_inst]
+    else:
+      insts = random.sample(insts_of_piece, random.randint(1, min(len(insts_of_piece), self.num_max_inst)))
+
+    
+    masked_src, org_src, loss_mask = self.get_processed_feature(insts, idx)          
+    return masked_src, org_src, loss_mask
