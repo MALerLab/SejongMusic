@@ -249,6 +249,7 @@ class JeongganDataset:
               feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
               # target_instrument='daegeum',
               num_max_inst:int=5,
+              augment_param=None,
               position_tokens=POSITION,
               piece_list:List[JeongganPiece]=None,
               tokenizer:JeongganTokenizer=None):
