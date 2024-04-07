@@ -1,3 +1,4 @@
+from collections import Counter
 import numpy as np
 from sejong_music.jg_code import JeongganPiece
 from sejong_music.constants import PITCH
@@ -91,3 +92,36 @@ def onset_f1(pred, gt, inst, tokenizer,
   f1 = 2 * precision * recall / (precision + recall)
 
   return f1, precision, recall
+
+
+def count_cooccurrences(piece:JeongganPiece, ignore_octaves=True):
+  '''
+  Counts co-occurring notes in a JeongganPiece.
+
+  Args:
+    piece: JeongganPiece object.
+    ignore_octaves: If True, notes in different octaves are considered the same.
+
+  Returns:
+    counts(Counter): {num_notes: num_occurrences}, max_cooccurring_notes(int)
+  '''
+  rolls = [piece.convert_tokens_to_roll(part, inst) for part, inst in zip(piece.tokenized_parts, piece.inst_list)]
+  rolls = [roll[:, 0] for roll in rolls]
+  
+  l = len(rolls[0])
+  for roll in rolls:
+    assert len(roll) == l, 'All parts must have the same length'
+  
+  rolls = np.stack(rolls, axis=1)
+  rolls = rolls[np.any(np.isin(rolls, PITCH), axis=1)]
+  rolls[~np.isin(rolls, PITCH)] = '-'
+
+  counts = []
+  for row in rolls:
+    row = row[row != '-']
+    if ignore_octaves:
+      row = [note[-1] for note in row]
+    counts.append(len(set(row)))
+  
+  counts = Counter(counts)
+  return counts, max(counts.keys())
