@@ -508,7 +508,22 @@ class OrchestraTrainer(Trainer):
 
 
 class JeongganTrainer(Trainer):
-  def __init__(self, model, optimizer, loss_fn, train_loader, valid_loader, device, save_dir, save_log=True, scheduler=None, clip_grad_norm=1, use_fp16=True, is_pos_counter=False, is_abc=False):
+  def __init__(self, 
+               model, 
+               optimizer, 
+               loss_fn, 
+               train_loader, 
+               valid_loader, 
+               device, 
+               save_dir, 
+               save_log=True, 
+               scheduler=None, 
+               clip_grad_norm=1,
+               use_fp16=True, 
+               epoch_per_infer=50,
+               min_epoch_for_infer=5,
+               is_pos_counter=False, 
+               is_abc=False):
     super().__init__(model, 
                      optimizer, 
                      loss_fn, 
@@ -519,12 +534,12 @@ class JeongganTrainer(Trainer):
                      save_log, 
                      scheduler, 
                      clip_grad_norm,
-                     epoch_per_infer=50,
-                     min_epoch_for_infer=5,
+                     epoch_per_infer=epoch_per_infer,
+                     min_epoch_for_infer=min_epoch_for_infer,
                      use_fp16=use_fp16)
     if is_abc:
       self.inferencer = ABCInferencer(model, True, True, 1.0, 0.9)
-    if is_pos_counter:
+    elif is_pos_counter:
       self.inferencer = JGInferencer(model, True, True, 1.0, 0.9)
     else:  
       self.inferencer = JGSimpleInferencer(model, True, True, 1.0, 0.9)

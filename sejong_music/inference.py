@@ -450,7 +450,6 @@ class ABCInferencer(JGInferencer):
           
       if decoded_token in self.tokenizer.dur_vocab:
         current_beat += decoded_token
-        
         if first_gak:
           if current_beat >= first_measure_duration:
             current_jg_idx += 1
@@ -487,6 +486,7 @@ class ABCInferencer(JGInferencer):
     return self._decode_inference_result(src, cat_out, (attention_map, cat_out, newly_generated))
 
   def encode_condition_token(self, current_beat, current_gak_idx, inst_name):
+    current_beat = round(current_beat, 5)
     jg_offset = int(current_beat // 1)
     beat_offset = Fraction(current_beat % 1).limit_denominator(6)
     return self.tokenizer([f'beat:{beat_offset}', f'jg:{jg_offset}', f'gak:{current_gak_idx}', inst_name])
