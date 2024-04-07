@@ -123,6 +123,8 @@ def main(config: DictConfig):
                                 scheduler=scheduler, 
                                 use_fp16=(device=='cuda'),
                                 is_pos_counter = config.data.is_pos_counter,
+                                epoch_per_infer=50,
+                                min_epoch_for_infer=5,
                                 is_abc=dataset_class==ABCDataset) # 이거 확인!
     generator = Generator(config=None,
                           model=model,
