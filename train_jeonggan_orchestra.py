@@ -9,19 +9,19 @@ import torch
 from torch.utils.data import DataLoader
 from omegaconf import DictConfig, OmegaConf
 
-from sejong_music import yeominrak_processing, model_zoo, loss, utils
+from sejong_music import yeominrak_processing, model_zoo, loss, utils, jg_code
 from sejong_music.yeominrak_processing import pack_collate
 from sejong_music.model_zoo import get_emb_total_size
 from sejong_music.loss import nll_loss, focal_loss
 from sejong_music.trainer import JeongganTrainer
 from sejong_music.train_utils import CosineLRScheduler
 # from sejong_music.constants import PART, POSITION, PITCH
-from sejong_music.jg_code import JeongganDataset
+from sejong_music.jg_code import JeongganDataset, ABCDataset
 from sejong_music.full_inference import Generator
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
-  return f'{current_time_in_str}_is_pos_counter={config.data.is_pos_counter}_is_pos_enc={config.model.is_pos_enc}_{config.general.exp_name}_{config.dataset_class}_{config.model_class}'
+  return f'{current_time_in_str}_dataclass={config.dataset_class}_model_depth={config.model.depth}_num_head={config.model.num_heads}_dropout={config.model.dropout}_is_pos_counter={config.data.is_pos_counter}_is_pos_enc={config.model.is_pos_enc}_{config.general.exp_name}_{config.model_class}'
 
 @hydra.main(config_path='yamls/', config_name='transformer_jeonggan')
 def main(config: DictConfig):
@@ -43,10 +43,10 @@ def main(config: DictConfig):
   if not save_dir.is_absolute():
     save_dir = original_wd / save_dir
   save_dir.mkdir(parents=True, exist_ok=True)
-  # dataset_class = JeongganDataset
+  dataset_class = getattr(jg_code, config.dataset_class)
   model_class = getattr(model_zoo, config.model_class)
   
-  train_dataset = JeongganDataset(data_path= original_wd / 'music_score/gen_code', 
+  train_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
                   # slice_measure_num = 2,
                   is_valid=False,
                   # use_pitch_modification=False,
@@ -58,7 +58,7 @@ def main(config: DictConfig):
                   is_pos_counter=config.data.is_pos_counter,
                   )
   
-  val_dataset = JeongganDataset(data_path= original_wd / 'music_score/gen_code', 
+  val_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
                   # slice_measure_num = 2,
                   is_valid=True,
                   # use_pitch_modification=False,
@@ -122,7 +122,8 @@ def main(config: DictConfig):
                                 save_dir=inst_save_dir, 
                                 scheduler=scheduler, 
                                 use_fp16=(device=='cuda'),
-                                is_pos_counter = config.data.is_pos_counter)
+                                is_pos_counter = config.data.is_pos_counter,
+                                is_abc=dataset_class==ABCDataset) # 이거 확인!
     generator = Generator(config=None,
                           model=model,
                           output_dir=inst_save_dir,
