@@ -6,7 +6,7 @@ from typing import Any, List, Union, Tuple
 import music21
 from music21 import note as mnote, stream as stream, meter as mmeter, key as mkey, pitch as mpitch
 
-from .constants import POSITION, PITCH
+from .constants import POSITION, PITCH, DURATION
 
 
 class JGCodeToOMRDecoder:
@@ -133,6 +133,18 @@ class JGCodeToOMRDecoder:
     return '\n\n'.join(outputs)
 
 
+class ABCNote:
+  def __init__(self, pitch:List[str], duration:float, global_offset:float):
+    self.pitch = pitch[0]
+    self.ornaments = pitch[1:]
+    self.duration = duration
+    self.global_offset = global_offset
+    self.is_rest = self.pitch == '쉼표'
+    self.midi_pitch = None
+    self.m21_notes = []
+
+  def __repr__(self) -> str:
+    return f"ABCNote({self.pitch}_{'_'.join(self.ornaments)}, {self.duration}, {self.global_offset}, {self.is_rest})"
 
 class Note:
   pos_to_beat_offset = {':0': 0,
@@ -159,7 +171,7 @@ class Note:
                         ':21': Fraction(2, 9),
                         ':22': Fraction(5, 9),
                         ':23': Fraction(8, 9)}
-  def __init__(self, pitch:List[str], pos:str, global_jg_offset:int, jg_offset:int, gak_offset:int) -> None:
+  def __init__(self, pitch:List[str], pos:str, global_jg_offset:int, jg_offset:int, gak_offset:int, duration:float=None) -> None:
     assert type(pitch) == list
     self.pitch = pitch[0]
     self.pos = pos
@@ -187,7 +199,6 @@ class Note:
   @property
   def offset(self):
     return self.global_jg_offset + self.beat_offset
-  
   
 
 class ThreeColumnDetector:
@@ -238,7 +249,7 @@ PITCH2MIDI = define_pitch2midi()
 
 
 class SigimsaeConverter:
-  def __init__(self, scale=['황', '태', '중', '임', '남', '무'], exceptional_pitches=[]):
+  def __init__(self, scale=['황', '태', '중', '임', '남'], exceptional_pitches=[]):
     self.scale = scale
     self.pitch2midi = OrderedDict({scale: PITCH2MIDI[scale] for scale in self.scale})
     octave_name = {"하하배": -3, "하배": -2, "배":-1, '':0, '청':+1, '중청':+2}
@@ -325,6 +336,7 @@ class JGToStaffConverter:
   pos_tokens = POSITION[2:] # exclude '|', '\n'
   pitch_converter = SigimsaeConverter()
   pitch_names = ["황" ,'대' ,'태' ,'협' ,'고' ,'중' ,'유' ,'임' ,'이' ,'남' ,'무' ,'응']
+  dur_tokens = DURATION
 
   
   def __init__(self, dur_ratio=1.5) -> None:
@@ -363,7 +375,8 @@ class JGToStaffConverter:
     total_notes[-1].duration = max(global_jg_offset - total_notes[-1].global_jg_offset, 1) - total_notes[-1].beat_offset
     return total_notes
 
-  def _fix_three_col_division(self, notes:List[Note]):
+  @staticmethod
+  def _fix_three_col_division(notes:List[Note]):
     three_col_detector = ThreeColumnDetector()
     for note in notes:
       three_col_detector(note)
@@ -380,7 +393,7 @@ class JGToStaffConverter:
     if isinstance(pitch, str):
       pitch = self.pitch_converter.pitch2midi[pitch]
     m21_note = mnote.Note(pitch=pitch, duration=music21.duration.Duration(duration * self.dur_ratio))
-    if grace:
+    if grace or duration == 0:
       m21_note = m21_note.getGrace()
     return m21_note
     
@@ -564,7 +577,7 @@ class JGToStaffConverter:
     exceptional_pitches = [x for x in pitch_counter.keys() if x not in most_five_common]
     return most_five_common, exceptional_pitches
   
-  def parse_scale(self, scale:Union[List[str], str]):
+  def parse_scale(self, scale:Union[List[str], str]) -> List[str]:
     if scale is None:
       return scale
     if isinstance(scale, str):
@@ -576,7 +589,7 @@ class JGToStaffConverter:
                tokens:Union[List[str], str], 
                time_signatures:str='3/8', 
                key_signature:int=-4,
-               scale=None,
+               scale:Union[str, List[str]]=None,
                verbose=False) -> Tuple[List[Note], music21.stream.Stream]:
 
     if isinstance(tokens, str):
@@ -595,6 +608,50 @@ class JGToStaffConverter:
     self.create_m21_notes(notes, verbose=verbose)
     stream = self.convert_m21_notes_to_stream(notes)
     return notes, stream
+  
+  def convert_abc_tokens(self, tokens:List[str],
+                         time_signatures:str='3/8', 
+                         key_signature:int=-4,
+                         scale=None,
+                         verbose=False):
+    notes = self.convert_abc_tokens_to_notes(tokens)
+    scale = self.parse_scale(scale)
+    if scale is None:
+      scale, exceptional_pitches = self.get_scale(notes)
+    if len(scale) < 4:
+      self.pitch_converter = SigimsaeConverter()
+    else:
+      self.pitch_converter = SigimsaeConverter(scale=scale, exceptional_pitches=exceptional_pitches)
+
+    self.create_m21_notes(notes, verbose=verbose)
+    stream = self.convert_m21_notes_to_stream(notes)
+
+    return notes, stream
+  
+  def convert_abc_tokens_to_notes(self, tokens:List[str]):
+    global_offset = 0
+    jg_offset = 0
+    gak_offset = 0
+    prev_note = []
+    total_notes = []
+
+    for token in tokens:
+      if token == '' or token in ('pad', 'start', 'end'): continue
+      if token in self.dur_tokens:
+        duration = token
+        if prev_note:
+          total_notes.append(ABCNote(prev_note, duration, global_offset))
+          prev_note = []
+        global_offset += duration
+        jg_offset += duration
+      elif token  == '\n':
+        gak_offset += 1
+        jg_offset = 0
+      else:
+        prev_note.append(token)
+    return total_notes
+
+  
   
   def convert_multi_track(self, tokens, scale=None, verbose=False):
     if isinstance(tokens, str):

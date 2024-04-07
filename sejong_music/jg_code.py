@@ -178,6 +178,7 @@ class ABCPiece(JeongganPiece):
   def get_abc_notes(self):
     abc_inst_parts = [JGToStaffConverter.convert_to_notes(part) for part in self.tokenized_parts]
     for notes in abc_inst_parts:
+      # JGToStaffConverter._fix_three_col_division(notes)
       JGToStaffConverter.get_duration_of_notes(notes) 
     featured_notes = [self.make_features(notes) for notes in abc_inst_parts]
     return featured_notes
@@ -548,8 +549,20 @@ class ABCDataset(JeongganDataset):
               position_tokens=POSITION,
               piece_list:List[JeongganPiece]=None,
               tokenizer:JeongganTokenizer=None, 
-              is_pos_counter=True):
-    super().__init__(data_path, slice_measure_num, is_valid, use_pitch_modification, pitch_modification_ratio, jeonggan_valid_set, feature_types, position_tokens, piece_list, tokenizer, is_pos_counter)
+              is_pos_counter=True,
+              augment_param=None,
+              num_max_inst=6):
+    super().__init__(data_path=data_path, 
+                     slice_measure_num=slice_measure_num, 
+                     is_valid=is_valid, 
+                     use_pitch_modification=use_pitch_modification, 
+                     pitch_modification_ratio=pitch_modification_ratio, 
+                     jeonggan_valid_set=jeonggan_valid_set, 
+                     feature_types=feature_types,
+                     position_tokens=position_tokens, 
+                     piece_list=piece_list, 
+                     tokenizer=tokenizer, 
+                     is_pos_counter=is_pos_counter)
     if self.is_pos_counter:
       self.feature_types = feature_types
     else:
