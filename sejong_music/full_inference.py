@@ -41,7 +41,8 @@ class Generator:
     
   
   def _load_model(self):
-    model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter72000_model.pt'
+    # model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter72000_model.pt'
+    model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter34800_model.pt'
     tokenizer_vocab_path = Path(self.config.inst_state_dir) / 'tokenizer_vocab.json'
     model_config_path = Path(self.config.inst_state_dir) / 'config.yaml'
     tokenizer:JeongganTokenizer = getattr(jg_code, self.config.class_names.tokenizer)(None, None, json_fn=tokenizer_vocab_path)
@@ -122,6 +123,31 @@ class Generator:
     gen_str = self.convert_xml_to_gen_code(score_fn, part_idx)
     gen_str = self.make_inst_sequential_inference(gen_str, target_order)
     return gen_str
+  
+  def inference_from_gen_code(self, text_fn, target_order:List[str]):
+    with open(text_fn, 'r') as f:
+      gen_str = f.read()
+    gen_str = self.make_inst_sequential_inference(gen_str, target_order)
+    return gen_str
+  
+  def cycle_inference_from_gen_code(self, text_fn, inst_cycles:List[str]=['piri', 'geomungo', 'gayageum', 'ajaeng', 'haegeum', 'daegeum'], num_cycles:int=6):
+    with open(text_fn, 'r') as f:
+      gen_str = f.read()
+      
+    for i in range(num_cycles):
+      gen_str = '\n\n'.join(gen_str.split('\n\n')[:-1])
+      inst_list = list(reversed(inst_cycles[1:]))
+      target_inst = inst_cycles[0]
+      print(inst_list, target_inst)
+      dataset = gen.prepare_dataset(gen_str, inst_list=inst_list) # reverse order
+      outputs_tensor = gen.make_full_inference_on_dataset(dataset, 
+                                                            target_inst=target_inst, 
+                                                            condition_instruments=inst_list)
+      gen_str = ' '.join(gen.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
+      new_cycles = copy.copy(inst_cycles[1:]) + copy.copy([inst_cycles[0]])
+      inst_cycles = new_cycles
+    
+    return gen_str
 
   @staticmethod
   def get_measure_specific_output(output:torch.LongTensor, measure_idx_in_token:int):
@@ -147,22 +173,42 @@ class Generator:
   
 
 
+
 if __name__ == '__main__':
   config = OmegaConf.load('yamls/gen_settings/jg_cph.yaml')
 
   gen = Generator(config)
-  score_fn = 'gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml'
   gen.model.to('cuda')
-  output_str = gen.inference_from_xml(score_fn, ['geomungo', 'gayageum', 'ajaeng', 'haegeum', 'piri', 'daegeum'])
-  
-  with open('gen_results/CHP_scoreCPH_from_1_0308-1209_gencode.txt', 'w') as f:
+  txt_fn = 'music_score/chwipunghyeong_bert_gen.txt'
+  output_str = gen.inference_from_gen_code(txt_fn, ['piri', 'geomungo', 'gayageum', 'ajaeng', 'haegeum',  'daegeum'])
+  with open('gen_results/chwipunghyeong_bert_orchestration_gencode4.txt', 'w') as f:
     f.write(output_str)
+
+  inst_cycles = ['piri', 'geomungo', 'gayageum', 'ajaeng', 'haegeum', 'daegeum']
+  output_str = gen.cycle_inference_from_gen_code(txt_fn, inst_cycles=inst_cycles, num_cycles=6)
+  # txt_fn = 'gen_results/chwipunghyeong_bert_orchestration_gencode2.txt'
+
+  
   
   jg_omr_str = gen.jg_to_omr_converter.convert_multi_inst_str(output_str)
-  with open('gen_results/CHP_scoreCPH_from_1_0308-1209_omr.txt', 'w') as f:
+  notes, score = gen.jg_to_staff_converter(output_str, time_signature='30/8')
+
+  with open('gen_results/chwipunghyeong_bert_orchestration_omr4.txt', 'w') as f:
     f.write(jg_omr_str)
   
-  notes, score = gen.jg_to_staff_converter(output_str)
+  score.write('musicxml', 'gen_results/chwipunghyeong_bert_orchestration_write3.musicxml')
+  
+  # score_fn = 'gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml'
+  # output_str = gen.inference_from_xml(score_fn, ['geomungo', 'gayageum', 'ajaeng', 'haegeum', 'piri', 'daegeum'])
 
-  score.write('musicxml', 'gen_results/CHP_scoreCPH_from_1_0308-1209_write.musicxml')
+  # with open('gen_results/CHP_scoreCPH_from_1_0308-1209_gencode.txt', 'w') as f:
+  #   f.write(output_str)
+  
+  # jg_omr_str = gen.jg_to_omr_converter.convert_multi_inst_str(output_str)
+  # with open('gen_results/CHP_scoreCPH_from_1_0308-1209_omr.txt', 'w') as f:
+  #   f.write(jg_omr_str)
+  
+  # notes, score = gen.jg_to_staff_converter(output_str)
+
+  # score.write('musicxml', 'gen_results/CHP_scoreCPH_from_1_0308-1209_write.musicxml')
   

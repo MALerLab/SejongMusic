@@ -18,11 +18,11 @@ from .model_zoo import JeongganTransSeq2seq, JeongganBERT
 from .decode import MidiDecoder, OrchestraDecoder
 from .inference_utils import prepare_input_for_next_part, get_measure_specific_output, fix_measure_idx, fill_in_source, get_measure_shifted_output, recover_beat, round_number
 from .inference import JGInferencer
-from .jg_to_staff_converter import JGToStaffConverter, JGCodeToOMRDecoder
+from .jg_to_staff_converter import JGToStaffConverter, JGCodeToOMRDecoder, Note
 from .jg_code import JeongganDataset, JeongganTokenizer, JeongganPiece
 from .jeonggan_utils import JGConverter, GencodeConverter, RollToJGConverter
 from .mlm_utils import Augmentor
-from .era_align_utils import AlignPredictor
+from .era_align_utils import AlignPredictor, EraAlignPairSet
 from .tokenizer import SingleVocabTokenizer
 
 class EraTransformer:
@@ -56,10 +56,11 @@ class EraTransformer:
     model.eval()
     return model, tokenizer, config
   
-  def convert_to_input_format(self, roll_array:np.ndarray):
+  def convert_to_input_format(self, roll_array:np.ndarray, add_start_end=True):
     assert roll_array.ndim == 2
     roll_list = roll_array.tolist()
-    roll_list = [ ['start'] * len(roll_list[0])] + roll_list + [ ['end'] * len(roll_list[0])]
+    if add_start_end:
+      roll_list = [ ['start'] * len(roll_list[0])] + roll_list + [ ['end'] * len(roll_list[0])]
     tokens = self.tokenizer(roll_list)
     return torch.LongTensor(tokens)
 
@@ -116,7 +117,7 @@ class EraTransformer:
     
   
   @torch.inference_mode()
-  def unmask_pitch_and_ornaments(self, x, loss_mask, n, onset_ratio):
+  def unmask_pitch_and_ornaments(self, x, loss_mask, n, onset_ratio=None):
     x = self.unmask_tokens(self.model, x, loss_mask, 0, n, onset_ratio)
     x = self.unmask_tokens(self.model, x, loss_mask, 1, n)
     return x
@@ -138,15 +139,44 @@ class EraTransformer:
     total_score.insert(0, org_score)
 
     return (notes, org_notes), total_score
+  
+  def infer_on_gen_str_with_alignment(self, gen_str:str, inst:str, idx:int=0, onset_ratio=None):
+    piece = JeongganPiece(None, gen_str=gen_str, inst_list=[inst])
+    x = piece.convert_tokens_to_roll(piece.sliced_parts_by_measure[idx][inst], inst)
+    x = self.convert_to_input_format(x, add_start_end=False)
+    cond = self.make_dummy_condition_tensor(num_jg=10, num_gak=4)
+    x = self.masker.mask_except_note_onset_to_ten(x, cond)
+    
+
+    # return (notes, org_notes), total_score
+  
+  def make_dummy_condition_tensor(self, num_jg=10, num_gak=4, inst='piri'):
+    outputs = []
+    for i in range(num_gak):
+      for j in range(num_jg):
+        for k in range(6):
+          frame = ['mask', 'mask', f'beat:{k}', f'jg:{j}', f'gak:{i}', inst]
+          outputs.append(frame)
+    return torch.LongTensor(self.tokenizer(outputs))
+    
 
 
 class EraTransformMasker:
   num_beat = 6
+  eight_to_ten = [0] * 6 * 8
+  for i in range(24):
+    eight_to_ten[i] = i
+  for i in range(24, 30):
+    eight_to_ten[i] = i + 6
+  for i in range(30, 48):
+    eight_to_ten[i] = i+12
+  eight_to_ten = torch.LongTensor(eight_to_ten)
+
   def __init__(self, mask_id:int, sus_id:int):
     self.mask_id = mask_id
     self.sus_id = sus_id
-    model_path = '/home/teo/userdata/SejongMusic/models/align_predictor.pt'
-    vocab_path = '/home/teo/userdata/SejongMusic/models/align_predictor_vocab.json'  
+    model_path = '/home/teo/userdata/git_libraries/SejongMusic/models/align_predictor.pt'
+    vocab_path = '/home/teo/userdata/git_libraries/SejongMusic/models/align_predictor_vocab.json'  
     self.tokenizer = SingleVocabTokenizer(None, json_fn=vocab_path)
     self.align_model = AlignPredictor(len(self.tokenizer.vocab), 64)
     self.align_model.load_state_dict(torch.load(model_path))
@@ -188,3 +218,58 @@ class EraTransformMasker:
     loss_mask[note_pair] = 0
     return masked, loss_mask
   
+  def mask_except_note_onset_to_ten(self, x:torch.Tensor, cond:torch.Tensor):
+    # assert x.ndim == 3 # (num_frame, num_feature, num_inst)
+    if (x.shape[0] - 2) % self.num_beat == 0:
+      x = x[1:-1]
+
+    loss_mask = torch.ones_like(cond, dtype=torch.long)
+    loss_mask[:, 2:] = 0
+    masked = cond.clone()
+
+    frame_ids, = torch.where(x[:,0] != self.sus_id)
+
+    gak_pos = frame_ids // (8 * self.num_beat)
+    converted_frame_ids = self.eight_to_ten[frame_ids % (8 * self.num_beat)] + gak_pos * 10 * self.num_beat
+    frame_ids, converted_frame_ids
+    masked[converted_frame_ids,0] = x[frame_ids, 0]
+    loss_mask[converted_frame_ids, 0] = 0
+    
+    masked = torch.cat([torch.LongTensor([[1] * masked.shape[1]]), masked, torch.LongTensor([[2] * masked.shape[1]]) ], dim=0 )
+    loss_mask = torch.cat([torch.LongTensor([[0] * loss_mask.shape[1]]), loss_mask, torch.LongTensor([[0] * loss_mask.shape[1]]) ], dim=0 )
+    
+    return masked, loss_mask
+
+  
+  @staticmethod
+  def convert_offset_to_strength(note:Note, era_idx):
+    offset = note.jg_offset + note.beat_offset
+    if offset == 0:
+      return 'strong'
+    if era_idx == 1:
+      if offset in (2, 5):
+        return 'middle'
+      else:
+        return 'weak'
+      
+    return 'weak'
+  
+  def predict_alignment(self, tokens:List[str], era_idx:int, threshold=0.2):
+    notes = JGToStaffConverter.convert_to_notes(tokens)
+    JGToStaffConverter.get_duration_of_notes(notes)
+    JGToStaffConverter().create_m21_notes(notes)
+    features = []
+    
+    for note in notes:
+      note_feature = [f'era{era_idx}', f'pitch{note.midi_pitch}', EraAlignPairSet.convert_duration(note.duration/2), self.convert_offset_to_strength(note, era_idx)]
+      features.append(note_feature)
+
+    masker_input = torch.LongTensor(self.tokenizer(features))
+    predict = self.align_model(masker_input.unsqueeze(0)).squeeze()
+    is_kept = predict > threshold
+    
+    new_notes = []
+    for note, keep in zip(notes, is_kept):
+      if keep:
+        new_notes.append(note)
+    return new_notes
