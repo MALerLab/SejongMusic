@@ -5,20 +5,22 @@ import json
 from pathlib import Path
 from typing import List, Set, Dict, Tuple, Union
 from collections import defaultdict, Counter
+from fractions import Fraction
 from pathlib import Path
 from tqdm.auto import tqdm
 import torch
 import numpy as np
 
 from .jg_to_staff_converter import JGToStaffConverter, Note
-from .constants import POSITION, PITCH, PART, DURATION, BEAT
+from .constants import POSITION, PITCH, PART, DURATION, BEAT, BEAT_POSITION
 from .utils import  as_fraction, FractionEncoder
 from .mlm_utils import Augmentor
 
 
 
 class JeongganPiece:
-  def __init__(self, txt_fn, gen_str=None, inst_list=None):
+  def __init__(self, txt_fn, gen_str=None, inst_list=None, use_offset=False):
+    self.use_offset = use_offset
     if gen_str:
       assert inst_list, "inst_list should be provided"
       self.name = 'gen_str'
@@ -49,11 +51,11 @@ class JeongganPiece:
       token_counter.update(part)
     return token_counter
     
-  @classmethod
-  def split_and_filter(cls, string, split_charater=' '):
+  def split_and_filter(self, string, split_charater=' '):
     splited = string.split(split_charater)
     filtered = [x for x in splited if x != '']
-    filtered = cls.filter_by_ignore_token(filtered)
+    filtered = self.filter_by_ignore_token(filtered)
+    if self.use_offset: filtered = self.convert_token_to_abs_offset(filtered)
     return filtered
   
   @staticmethod
@@ -151,6 +153,23 @@ class JeongganPiece:
     outputs[outputs==0] = '비어있음'
     return outputs
   
+  @staticmethod
+  def convert_token_to_abs_offset(tokens:List[str]):
+    notes:List[Note] = JGToStaffConverter.convert_to_notes(tokens)
+    JGToStaffConverter._fix_three_col_division(notes)
+    note_id = 0
+    new_tokens = []
+
+    for token in tokens:
+      if token in POSITION[2:]: # if token is position, not | or \n
+        new_token = f"beat:{str(Fraction(notes[note_id].beat_offset))}"
+        new_tokens.append(new_token)
+        note_id += 1
+      else:
+        new_tokens.append(token)
+    return new_tokens
+
+  
   def __len__(self):
     return len(self.parts[0].split('\n'))
   
@@ -245,12 +264,13 @@ class ABCPiece(JeongganPiece):
 
 
 class JeongganTokenizer:
-    def __init__(self, special_token, feature_types=['index', 'token', 'position'], is_roll=False, json_fn=None):
+    def __init__(self, special_token, feature_types=['index', 'token', 'position'], is_roll=False, json_fn=None, use_offset=False):
         if json_fn:
           self.load_from_json(json_fn)
           return      
         self.key_types = feature_types
-        existing_tokens = POSITION + PITCH
+        pos_tokens = BEAT_POSITION if use_offset else POSITION
+        existing_tokens = pos_tokens + PITCH
         special_token = [token for token in special_token if token not in existing_tokens]
         self.special_token = special_token
 
@@ -262,14 +282,14 @@ class JeongganTokenizer:
           self.vocab += [f'beat:{i}' for i in range(6)]
         else:
           self.pred_vocab_size = len(existing_tokens+ special_token) + 3 # pad start end
-          self.vocab = ['pad', 'start', 'end'] + POSITION + PITCH + special_token + PART # + special_token]
-          self.vocab += [f'prev{x}' for x in POSITION] # add prev position token
+          self.vocab = ['pad', 'start', 'end'] + pos_tokens + PITCH + special_token + PART # + special_token]
+          self.vocab += [f'prev{x}' for x in pos_tokens] # add prev position token
         self.vocab += [f'jg:{i}' for i in range(20)] # add jg position
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
         self.vocab_size_dict = {'total': len(self.vocab)}
-        self.pos_vocab = POSITION
+        self.pos_vocab = pos_tokens
         self.note2token = {}
     
     
@@ -328,13 +348,18 @@ class JeongganDataset:
               position_tokens=POSITION,
               piece_list:List[JeongganPiece]=None,
               tokenizer:JeongganTokenizer=None, 
-              is_pos_counter=True):
+              is_pos_counter=True,
+              use_offset=False,):
     
     data_path = Path(data_path)
     self.data_path = data_path
     self.is_valid = is_valid
     self.position_tokens = position_tokens
     self.is_pos_counter = is_pos_counter
+    self.use_offset = use_offset
+    self.num_max_inst = num_max_inst
+    if self.use_offset: 
+      self.position_tokens = BEAT_POSITION
     if self.is_pos_counter:
       self.feature_types = feature_types
     else:
@@ -344,7 +369,7 @@ class JeongganDataset:
       self.all_pieces = piece_list
     else:
       texts = glob.glob(str(data_path / '*.txt'))
-      all_pieces = [JeongganPiece(text) for text in texts]
+      all_pieces = [JeongganPiece(text, use_offset=use_offset) for text in texts]
       # all_pieces = [ABCPiece(text) for text in texts]
       self.all_pieces = [x for x in all_pieces if x.is_clean]
 
@@ -375,7 +400,7 @@ class JeongganDataset:
       self.vocab = tokenizer.vocab
     else:
       unique_token = sorted(list(set([key for piece in self.all_pieces for key in piece.token_counter.keys() ])))
-      self.tokenizer = JeongganTokenizer(unique_token, feature_types=feature_types)
+      self.tokenizer = JeongganTokenizer(unique_token, feature_types=feature_types, use_offset=self.use_offset)
       self.vocab = self.tokenizer.vocab
 
   def __len__(self):
@@ -473,9 +498,8 @@ class JeongganDataset:
       condition_instruments = insts_of_piece[1:]
     else:
       target_instrument = random.choice(insts_of_piece)
-      condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, len(insts_of_piece)-1))
+      condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, min(len(insts_of_piece)-1, self.num_max_inst ) ))
 
-    
     src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)          
     return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
 

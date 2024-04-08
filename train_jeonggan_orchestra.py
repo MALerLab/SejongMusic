@@ -61,7 +61,8 @@ def main(config: DictConfig):
                   # target_instrument='daegeum'
                   is_pos_counter=config.data.is_pos_counter,
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst
+                  num_max_inst = config.data.num_max_inst,
+                  use_offset=config.data.use_offset
                   )
   
   val_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
@@ -76,7 +77,8 @@ def main(config: DictConfig):
                   # target_instrument=0,
                   is_pos_counter=config.data.is_pos_counter,
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst
+                  num_max_inst = config.data.num_max_inst,
+                  use_offset=config.data.use_offset
                   )
     
   collate_fn = getattr(utils, config.collate_fn)

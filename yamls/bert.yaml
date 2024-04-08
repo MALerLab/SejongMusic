@@ -23,6 +23,7 @@ data:
   sampling_rate: 2
   target_instrument: 0
   num_max_inst: 4
+  use_offset: False
 
 
 model:
