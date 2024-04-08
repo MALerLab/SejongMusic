@@ -512,7 +512,7 @@ class ABCTokenizer:
 
         self.vocab = ['pad', 'start', 'end'] + DURATION + PITCH + special_token + PART # + special_token]
         self.vocab += [f'beat:{x}' for x in BEAT] # add beat position token
-        self.vocab += [f'jg:{i}' for i in range(20)]+['jg:20']  # add jg position # 오류가 계속 나서 jg:20 추가해놓았음. 실제로는 이러면 measure length error
+        self.vocab += [f'jg:{i}' for i in range(20)]  # add jg position 
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  

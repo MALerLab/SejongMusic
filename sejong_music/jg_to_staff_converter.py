@@ -577,7 +577,7 @@ class JGToStaffConverter:
   
   def __call__(self, 
                tokens:Union[List[str], str], 
-               time_signatures:str='3/8', 
+               time_signature:str='3/8', 
                key_signature:int=-4,
                scale:Union[str, List[str]]=None,
                verbose=False) -> Tuple[List[Note], music21.stream.Stream]:
@@ -596,7 +596,7 @@ class JGToStaffConverter:
     self._fix_three_col_division(notes)
     self.get_duration_of_notes(notes)
     self.create_m21_notes(notes, verbose=verbose)
-    stream = self.convert_m21_notes_to_stream(notes)
+    stream = self.convert_m21_notes_to_stream(notes, time_signature=time_signature, key_signature=key_signature)
     return notes, stream
   
   def convert_abc_tokens(self, tokens:List[str],
@@ -643,7 +643,7 @@ class JGToStaffConverter:
 
   
   
-  def convert_multi_track(self, tokens, scale=None, verbose=False):
+  def convert_multi_track(self, tokens, scale=None, verbose=False, time_signature='3/8', key_signature=-4):
     if isinstance(tokens, str):
       assert '\n\n' in tokens, 'tokens가 str인 경우에는 두 개 이상의 트랙이 있어야 함'
       token_by_inst = tokens.split('\n\n')
@@ -654,7 +654,7 @@ class JGToStaffConverter:
     entire_notes = []
     entire_stream = music21.stream.Score()
     for inst_tokens in token_by_inst:
-      notes, stream = self(inst_tokens, scale=scale, verbose=verbose)
+      notes, stream = self(inst_tokens, scale=scale, verbose=verbose, time_signature=time_signature, key_signature=key_signature)
       entire_notes.append(notes)
       entire_stream.insert(0, stream)
     return entire_notes, entire_stream
