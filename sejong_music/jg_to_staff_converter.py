@@ -7,7 +7,8 @@ import music21
 from music21 import note as mnote, stream as stream, meter as mmeter, key as mkey, pitch as mpitch
 
 from .constants import POSITION, PITCH, DURATION
-
+from .jeonggan_utils import JGConverter, GencodeConverter
+from .abc_utils import ABCNote
 
 class JGCodeToOMRDecoder:
   pos_tokens = POSITION
@@ -133,18 +134,6 @@ class JGCodeToOMRDecoder:
     return '\n\n'.join(outputs)
 
 
-class ABCNote:
-  def __init__(self, pitch:List[str], duration:float, global_offset:float):
-    self.pitch = pitch[0]
-    self.ornaments = pitch[1:]
-    self.duration = duration
-    self.global_offset = global_offset
-    self.is_rest = self.pitch == '쉼표'
-    self.midi_pitch = None
-    self.m21_notes = []
-
-  def __repr__(self) -> str:
-    return f"ABCNote({self.pitch}_{'_'.join(self.ornaments)}, {self.duration}, {self.global_offset}, {self.is_rest})"
 
 class Note:
   pos_to_beat_offset = {':0': 0,
@@ -339,8 +328,9 @@ class JGToStaffConverter:
   dur_tokens = DURATION
 
   
-  def __init__(self, dur_ratio=1.5) -> None:
+  def __init__(self, dur_ratio=1.5, is_abc=False) -> None:
     self.dur_ratio = dur_ratio
+    self.is_abc = is_abc
 
   @staticmethod
   def _append_note(prev_note, prev_pos, global_jg_offset, jg_offset, gak_offset, total_notes):
@@ -640,7 +630,7 @@ class JGToStaffConverter:
       if token in self.dur_tokens:
         duration = token
         if prev_note:
-          total_notes.append(ABCNote(prev_note, duration, global_offset))
+          total_notes.append(ABCNote(prev_note, duration, global_offset, jg_offset//1, gak_offset))
           prev_note = []
         global_offset += duration
         jg_offset += duration
@@ -902,3 +892,33 @@ def piece_to_txt(piece):
   symbols_in_gaks = '\n'.join(symbols_in_gaks)
   return symbols_in_gaks
 
+class ABCtoGenConverter:
+  def __init__(self):
+    self.to_omr_converter = JGConverter(jeonggan_quarter_length=Fraction(1.0))
+    self.gencode_converter = GencodeConverter()
+    self.decoder = JGToStaffConverter()
+  
+  @staticmethod
+  def group_by_attribute(alist:List, attribute:str):
+    outputs = []
+    prev_attribute = None
+    for a in alist:
+      if prev_attribute is None:
+        prev_attribute = getattr(a, attribute)
+        outputs.append([a])
+      elif getattr(a, attribute) == prev_attribute:
+        outputs[-1].append(a)
+      else:
+        prev_attribute = getattr(a, attribute)
+        outputs.append([a])
+    return outputs
+  
+  def __call__(self, tokens:List[str]):
+    notes, _ = self.decoder.convert_abc_tokens(tokens)
+    note_by_measure = self.group_by_attribute(notes, 'gak_offset')
+    part_text = []
+    for i, note_in_measure in enumerate(note_by_measure):
+      conv_jgs = self.to_omr_converter.list_of_abc_notes_to_jeonggan(note_in_measure)
+      text_jgs = self.to_omr_converter.jeonggan_note_to_text(conv_jgs)
+      part_text.append('|'.join(text_jgs))
+    return self.gencode_converter.convert_lines_to_gencode(part_text)

@@ -134,8 +134,7 @@ def main(config: DictConfig):
                                 epoch_per_infer=50,
                                 min_epoch_for_infer=5,
                                 is_abc=dataset_class==ABCDataset, # 이거 확인!
-                                scheduler=scheduler,
-                                min_epoch_for_infer=100)
+                                )
     generator = Generator(config=None,
                           model=model,
                           output_dir=inst_save_dir,

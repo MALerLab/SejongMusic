@@ -544,7 +544,7 @@ class JeongganTrainer(Trainer):
       self.inferencer = JGInferencer(model, True, True, 1.0, 0.9)
     else:  
       self.inferencer = JGSimpleInferencer(model, True, True, 1.0, 0.9)
-    self.decoder = JGToStaffConverter(dur_ratio=1.5)
+    self.decoder = JGToStaffConverter(dur_ratio=1.5, is_abc=is_abc)
     
   
   

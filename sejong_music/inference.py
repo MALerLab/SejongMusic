@@ -13,7 +13,7 @@ from sejong_music.model_zoo import Seq2seq, QkvAttnSeq2seqOrch, get_emb_total_si
 from sejong_music.utils import convert_note_to_sampling, convert_onset_to_sustain_token, make_offset_set
 from sejong_music.sampling_utils import nucleus
 from sejong_music.constants import get_dynamic_template_for_orch, get_dynamic, POSITION, DURATION, PITCH
-
+from sejong_music.jg_to_staff_converter import ABCtoGenConverter
 
 class Inferencer:
   def __init__(self, 
@@ -397,7 +397,8 @@ class ABCInferencer(JGInferencer):
               temperature: float = 1, 
               top_p: float = 1):
     super().__init__(model, is_condition_shifted, is_orch, temperature=temperature, top_p=top_p)
-
+    self.jg_decoder = ABCtoGenConverter()
+    
   def get_start_token(self, inst:str):
     return torch.LongTensor(self.tokenizer(['start', 'beat:0', 'jg:0', 'gak:0', inst])).unsqueeze(0)
   
@@ -507,6 +508,27 @@ class ABCInferencer(JGInferencer):
         second_duration_list.append(Fraction(note[0]))
     return sum(first_duration_list), sum(second_duration_list)
   
+  def _decode_inference_result(self, src, output, other_out):
+
+    src_decoded = [[token[0], token[-1]] for token in self.tokenizer.decode(src[1:-1])] #tokens = [x[0] for x in output]
+    out_decoded = [[token[0], token[-1]] for token in self.tokenizer.decode(output)]
+    src_decoded = self._split_by_inst_to_decode(src_decoded)
+    out_decoded = self._split_by_inst_to_decode(out_decoded)
+
+    return src_decoded, out_decoded, other_out
+  
+  def _split_by_inst_to_decode(self, tokens:List):
+    inst_list = []
+    for token in tokens:
+      if token[1] not in inst_list:
+        inst_list.append(token[1])
+    all_tokens = []
+    for inst in inst_list:
+      inst_tokens = [token[0] for token in tokens if token[1] == inst]
+      decoded = self.jg_decoder(inst_tokens).split(' ') 
+      decoded = [[note, inst] for note in decoded]
+      all_tokens += decoded
+    return all_tokens    
   
 
 def sequential_inference(model:Seq2seq, sample:torch.Tensor, decoder):
