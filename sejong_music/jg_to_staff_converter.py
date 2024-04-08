@@ -363,7 +363,8 @@ class JGToStaffConverter:
     total_notes[-1].duration = max(global_jg_offset - total_notes[-1].global_jg_offset, 1) - total_notes[-1].beat_offset
     return total_notes
 
-  def _fix_three_col_division(self, notes:List[Note]):
+  @staticmethod
+  def _fix_three_col_division(notes:List[Note]):
     three_col_detector = ThreeColumnDetector()
     for note in notes:
       three_col_detector(note)

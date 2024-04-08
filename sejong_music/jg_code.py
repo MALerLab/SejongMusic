@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import List, Set, Dict, Tuple, Union
 from collections import defaultdict, Counter
+from fractions import Fraction
 from pathlib import Path
 from tqdm.auto import tqdm
 import torch
@@ -18,7 +19,8 @@ from .mlm_utils import Augmentor
 
 
 class JeongganPiece:
-  def __init__(self, txt_fn, gen_str=None, inst_list=None):
+  def __init__(self, txt_fn, gen_str=None, inst_list=None, use_offset=False):
+    self.use_offset = use_offset
     if gen_str:
       assert inst_list, "inst_list should be provided"
       self.name = 'gen_str'
@@ -54,6 +56,7 @@ class JeongganPiece:
     splited = string.split(split_charater)
     filtered = [x for x in splited if x != '']
     filtered = self.filter_by_ignore_token(filtered)
+    if self.use_offset: filtered = JeongganPiece.convert_token_to_abs_offset(filtered)
     return filtered
   
   # @staticmethod
@@ -150,6 +153,23 @@ class JeongganPiece:
     #     outputs[start_frame, 1] = '음표시작'
     outputs[outputs==0] = '비어있음'
     return outputs
+  
+  @staticmethod
+  def convert_token_to_abs_offset(tokens:List[str]):
+    notes:List[Note] = JGToStaffConverter.convert_to_notes(tokens)
+    JGToStaffConverter._fix_three_col_division(notes)
+    note_id = 0
+    new_tokens = []
+
+    for token in tokens:
+      if token in POSITION[2:]: # if token is position, not | or \n
+        new_token = f"beat:{str(Fraction(notes[note_id].beat_offset))}"
+        new_tokens.append(new_token)
+        note_id += 1
+      else:
+        new_tokens.append(token)
+    return new_tokens
+
   
   def __len__(self):
     return len(self.parts[0].split('\n'))
