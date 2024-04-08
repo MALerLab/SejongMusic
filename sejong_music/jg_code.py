@@ -308,7 +308,10 @@ class JeongganTokenizer:
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }
         self.pred_vocab_size = self.vocab.index(PART[0])
         self.vocab_size_dict = {'total': len(self.vocab)}
-        self.pos_vocab = POSITION
+        if 'beat:0' in self.vocab:
+          self.pos_vocab = BEAT_POSITION
+        else:
+          self.pos_vocab = POSITION
         
     def decode(self, idx:Union[torch.Tensor, List[int], int]):
         if isinstance(idx, torch.Tensor):

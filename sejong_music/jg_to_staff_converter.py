@@ -6,7 +6,7 @@ from typing import Any, List, Union, Tuple
 import music21
 from music21 import note as mnote, stream as stream, meter as mmeter, key as mkey, pitch as mpitch
 
-from .constants import POSITION, PITCH, DURATION
+from .constants import POSITION, PITCH, DURATION, BEAT_POSITION
 from .jeonggan_utils import JGConverter, GencodeConverter
 from .abc_utils import ABCNote
 
@@ -871,21 +871,7 @@ class JeongganboParser:
         prev_symbol = symbol
     prev_symbol.duration = len(jeonggans) - prev_offset
     return None
-  
-  def __call__(self, token_str:str):
-    sb_reader = SymbolReader()
-    for i, jeonggan in enumerate(piece.jeonggans):
-      if i == 1920: # In Yeominlak, this is where the tempo changes
-        sb_reader.handle_remaining_note(i)
-        sb_reader.prev_pitch = 0
-        sb_reader.dur_ratio = 3.0
-        sb_reader.prev_offset = sb_reader.prev_offset * 2
-      for symbol in jeonggan.symbols:
-        sb_reader(i, symbol)
-    sb_reader.handle_remaining_note(i+1)
-    score = self.make_score_from_notes(sb_reader.entire_notes)
 
-    return
 
 def piece_to_txt(piece):
   symbols_in_gaks = [','.join([str(symbol) for jeonggan in gak.jeonggans for symbol in jeonggan.symbols]) for gak in piece.gaks if not gak.is_jangdan]
@@ -922,3 +908,52 @@ class ABCtoGenConverter:
       text_jgs = self.to_omr_converter.jeonggan_note_to_text(conv_jgs)
       part_text.append('|'.join(text_jgs))
     return self.gencode_converter.convert_lines_to_gencode(part_text)
+  
+  
+class BeatToGenConverter:
+  abc2gen_converter = ABCtoGenConverter()
+
+  @staticmethod
+  def convert_beat_token_to_abc_notes(tokens):
+    total_notes = []
+    global_jg_offset = 0
+    prev_notes = []
+    prev_position = 0
+    position_tokens = BEAT_POSITION
+    gak_idx = 0
+    jg_idx = 0
+    for token in tokens:
+      if token in ('|', '\n'):      
+        global_jg_offset += 1
+        if prev_notes:
+          total_notes.append(ABCNote(prev_notes, duration=global_jg_offset-prev_position, global_offset=prev_position, jg_offset=jg_idx, gak_offset=gak_idx))
+          prev_notes = []
+        if token == '|': 
+          jg_idx += 1
+        if token == '\n':
+          gak_idx += 1
+          jg_idx = 0
+        continue
+      if token in BEAT_POSITION:
+        current_offset = global_jg_offset + Fraction(token[5:])
+        if prev_notes:
+          total_notes.append(ABCNote(prev_notes, duration=current_offset-prev_position, global_offset=prev_position, jg_offset=jg_idx, gak_offset=gak_idx))
+        prev_position = current_offset
+        prev_notes = []
+      else:
+        prev_notes.append(token)
+    return total_notes
+
+    
+  def __call__(self, tokens:List[str]):
+    notes = self.convert_beat_token_to_abc_notes(tokens)
+    note_by_measure = self.abc2gen_converter.group_by_attribute(notes, 'gak_offset')
+    note_by_measure = [x for x in note_by_measure if len(x)>0]
+    part_text = []
+    for i, note_in_measure in enumerate(note_by_measure):
+      conv_jgs = self.abc2gen_converter.to_omr_converter.list_of_abc_notes_to_jeonggan(note_in_measure)
+      text_jgs = self.abc2gen_converter.to_omr_converter.jeonggan_note_to_text(conv_jgs)
+      part_text.append('|'.join(text_jgs))
+    gen_code = self.abc2gen_converter.gencode_converter.convert_lines_to_gencode(part_text)
+    # gen_code_tokens = ' '.join([x for x in gen_code.split(' ') if x != ''])
+    return gen_code

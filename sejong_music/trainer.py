@@ -592,12 +592,20 @@ class JeongganTrainer(Trainer):
       # if input_part_idx < 2: continue
       try:
         src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
-      except:
+      except Exception as e:
         print(f"Error occured in inference result: {e}")
         # print([note[2] for note in output])
       try:
-        jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-        f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+        if self.inferencer.use_offset:
+          shifted_tgt = self.inferencer.beat2gen(self.inferencer.tokenizer.decode(shifted_tgt)).split(' ') 
+          shifted_tgt = [x for x in shifted_tgt if x != ''] + ['\n']
+          out_decoded = [x[0] for x in out_decoded]
+          jg_note_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          f1, prec, recall = onset_f1(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+
+        else:
+          jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
       except:
         jg_note_acc = 0
         f1, prec, recall = 0, 0, 0

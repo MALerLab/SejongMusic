@@ -1,5 +1,6 @@
 from collections import Counter
 import numpy as np
+import torch
 from sejong_music.jg_code import JeongganPiece
 from sejong_music.constants import PITCH
 
@@ -22,10 +23,15 @@ def per_jg_note_acc(pred, gt, inst, tokenizer,
   Returns:
     Accuracy(float)
   '''
-  pred_roll = JeongganPiece.convert_tokens_to_roll(tokenizer.decode(pred),
+  if isinstance(pred, torch.Tensor):
+    pred = tokenizer.decode(pred)
+  if isinstance(gt, torch.Tensor):
+    gt = tokenizer.decode(gt)
+  
+  pred_roll = JeongganPiece.convert_tokens_to_roll(pred,
                                                    inst=inst,
                                                    num_frame_per_jg=num_frame_per_jg)
-  gt_roll = JeongganPiece.convert_tokens_to_roll(tokenizer.decode(gt),
+  gt_roll = JeongganPiece.convert_tokens_to_roll(gt,
                                                  inst=inst,
                                                  num_frame_per_jg=num_frame_per_jg)
   assert pred_roll.shape == gt_roll.shape, f"Length of pred and gt must be the same. {pred_roll.shape} != {gt_roll.shape}"
@@ -69,10 +75,15 @@ def onset_f1(pred, gt, inst, tokenizer,
   Returns:
     F1, Precision, Recall(float)
   '''
-  pred_roll = JeongganPiece.convert_tokens_to_roll(tokenizer.decode(pred),
+  if isinstance(pred, torch.Tensor):
+    pred = tokenizer.decode(pred)
+  if isinstance(gt, torch.Tensor):
+    gt = tokenizer.decode(gt)
+
+  pred_roll = JeongganPiece.convert_tokens_to_roll(pred,
                                                    inst=inst,
                                                    num_frame_per_jg=num_frame_per_jg)
-  gt_roll = JeongganPiece.convert_tokens_to_roll(tokenizer.decode(gt),
+  gt_roll = JeongganPiece.convert_tokens_to_roll(gt,
                                                  inst=inst,
                                                  num_frame_per_jg=num_frame_per_jg)
   assert pred_roll.shape == gt_roll.shape, f"Length of pred and gt must be the same. {pred_roll.shape} != {gt_roll.shape}"
