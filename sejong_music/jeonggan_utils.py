@@ -2,6 +2,7 @@ from typing import List
 import copy
 import music21
 from fractions import Fraction
+from math import ceil
 from .utils import apply_tie, Gnote
 from .abc_utils import ABCNote
 
@@ -49,7 +50,8 @@ class JGConverter:
     return conv_jgs
 
   def list_of_abc_notes_to_jeonggan(self, sel_meas:List[ABCNote]): 
-    conv_jgs = [[] for _ in range(self.num_jeonggan_per_gak)]
+    num_jg = ceil(sel_meas[-1].jg_offset + sel_meas[-1].duration)
+    conv_jgs = [[] for _ in range(num_jg)]
     for note in sel_meas:
       cur_jg = conv_jgs[int(note.offset//self.jql)]
       beat_offset = note.global_offset % self.jql
@@ -77,6 +79,8 @@ class JGConverter:
           text_jgs[i] = '-:2 -:5'
         elif start_pos == self.jql / 6 * 5:
           text_jgs[i] = '-:2 -:5 -:7'
+        elif start_pos == self.jql / 4 * 3:
+          text_jgs[i] = '-:10 -:14'
         else:
           print(f"None of the start_pos is matched: {start_pos}")
 
@@ -102,6 +106,8 @@ class JGConverter:
             text_jgs[i] += f'{note[0]}:1'
           elif note[1] == self.jql * 5 / 6:
             text_jgs[i] += f'{note[0]}:2 -:5 -:7'
+          elif note[1] == self.jql * 3 / 4:
+            text_jgs[i] += f'{note[0]}:10 -:14'
           else:
             print(f"None of the note[1] is matched while note[2]==0: {note}")
         elif note[2] == self.jql / 6:
@@ -167,6 +173,11 @@ class JGConverter:
             text_jgs[i] += f' {note[0]}:9'
           else:
             print(f"None of the note[1] is matched while note[2]==1.25: {note}")
+        elif note[2] == self.jql / 4 * 3:
+          if note[1] >= self.jql / 4:
+            text_jgs[i] += f' {note[0]}:15'
+          else:
+            print(f"None of the note[1] is matched while note[2]==1.5 * 3/4: {note}")
         else:
           print(f"None of the note[2] is matched: {note}")
         
