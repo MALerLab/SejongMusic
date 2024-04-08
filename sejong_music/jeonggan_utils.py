@@ -261,7 +261,7 @@ class RollToJGConverter(JGConverter):
       if frame[0] in ('-', '비어있음') and frame[1] == '비어있음': continue
       if frame[0] != '-':
         if notes: 
-          for j in range(1, 5):
+          for j in range(1, len(notes)+1):
             if notes[-j][0] != '-':
               notes[-j].append(f'dur:{i-prev_frame}')
               break
@@ -269,7 +269,12 @@ class RollToJGConverter(JGConverter):
               notes[-j].append(f'dur:{0}')
         prev_frame = i
       notes.append(frame)
-    notes[-1].append(f'dur:{len(roll)-prev_frame}')
+    if notes[-1][0] != '-':
+      notes[-1].append(f'dur:{len(roll)-prev_frame}')
+    else:
+      notes[-1].append(f'dur:{0}')
+    if len(notes) > 1 and len(notes[-2]) ==6:
+      notes[-2].append(f'dur:{len(roll)-prev_frame}')
 
     return notes
   
