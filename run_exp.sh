@@ -1,10 +1,4 @@
-CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dropout=0.2 model.dim=64 model.depth=4 general.entity=dasaem train.num_epoch=300 
-CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dropout=0.2 model.dim=64 model.depth=6 general.entity=dasaem train.num_epoch=300 
-CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dropout=0.2 model.dim=64 model.depth=8 general.entity=dasaem train.num_epoch=300 
-CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dropout=0.5 model.dim=64 model.depth=8 general.entity=dasaem train.num_epoch=300 
-CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dropout=0.2 model.dim=128 model.depth=8 general.entity=dasaem train.num_epoch=300 
-CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dropout=0.2 model.dim=64 model.depth=10 general.entity=dasaem train.num_epoch=300
-CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dropout=0.2 model.dim=64 model.depth=12 general.entity=dasaem train.num_epoch=300 
-CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dropout=0.2 model.dim=64 model.depth=14 general.entity=dasaem train.num_epoch=300 
-CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dropout=0.2 model.dim=64 model.depth=16 general.entity=dasaem train.num_epoch=300 
-CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dropout=0.2 model.dim=128 model.depth=16 general.entity=dasaem train.num_epoch=300 
+CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dim=64 model.depth=6 model.dropout=0.2 general.entity=dasaem
+CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dim=128 model.depth=6 model.dropout=0.2 general.entity=dasaem
+CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dim=128 model.depth=8 model.dropout=0.2 general.entity=dasaem
+CUDA_VISIBLE_DEVICES=1 python3 train_jeonggan_orchestra.py model.dim=64 model.depth=10 model.dropout=0.2 general.entity=dasaem
