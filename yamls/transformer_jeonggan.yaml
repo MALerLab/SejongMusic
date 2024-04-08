@@ -26,6 +26,7 @@ data:
   # is_pos_counter: True
   is_pos_counter: True
   num_max_inst: 4
+  use_offset: False
 
 model:
   dim: 64
