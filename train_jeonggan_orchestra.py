@@ -138,7 +138,8 @@ def main(config: DictConfig):
     generator = Generator(config=None,
                           model=model,
                           output_dir=inst_save_dir,
-                          inferencer=atrainer.inferencer
+                          inferencer=atrainer.inferencer, 
+                          is_abc = dataset_class==ABCDataset,
                           )
 
     atrainer.iteration = total_iteration

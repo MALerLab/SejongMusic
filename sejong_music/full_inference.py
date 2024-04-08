@@ -16,12 +16,13 @@ from sejong_music.model_zoo import JeongganTransSeq2seq
 from sejong_music.decode import MidiDecoder, OrchestraDecoder
 from sejong_music.inference import JGInferencer
 from sejong_music.jg_to_staff_converter import JGToStaffConverter, JGCodeToOMRDecoder
-from sejong_music.jg_code import JeongganDataset, JeongganTokenizer, JeongganPiece
+from sejong_music.jg_code import JeongganDataset, JeongganTokenizer, JeongganPiece, ABCPiece, ABCDataset
 from sejong_music.jeonggan_utils import JGConverter, GencodeConverter
 
 
 class Generator:
-  def __init__(self, config, model=None, output_dir=None, inferencer=None):
+  def __init__(self, config, model=None, output_dir=None, inferencer=None, is_abc=False):
+    self.is_abc = is_abc
     if config:
       self.config = config
       self.output_dir = Path(config.output_dir)
@@ -56,7 +57,8 @@ class Generator:
                                                                                      self.tokenizer, 
                                                                                      is_orch=True,
                                                                                      temperature=self.config.temperature,
-                                                                                     top_p=self.config.top_p)
+                                                                                     top_p=self.config.top_p,
+                                                                                     is_abc=self.is_abc)
     return inferencer
 
   def convert_xml_to_gen_code(self, score_fn, part_idx=-1):
@@ -69,8 +71,12 @@ class Generator:
     return gen_str
 
   def prepare_dataset(self, gen_str, inst_list:List[str]):
-    piece = JeongganPiece(None, gen_str=gen_str, inst_list=inst_list)
-    dataset = JeongganDataset(piece_list=[piece], tokenizer=self.tokenizer)
+    if self.is_abc:
+      piece = ABCPiece(None, gen_str=gen_str, inst_list=inst_list)
+      dataset = ABCDataset(piece_list=[piece], tokenizer=self.tokenizer)
+    else:
+      piece = JeongganPiece(None, gen_str=gen_str, inst_list=inst_list)
+      dataset = JeongganDataset(piece_list=[piece], tokenizer=self.tokenizer)
     
     return dataset
   
@@ -92,7 +98,10 @@ class Generator:
       else:
         sel_out = self.get_measure_specific_output(output, self.tokenizer.tok2idx[f'gak:2']) 
       # pp.pprint(output_decoded[:5])
-      prev_generation = self.get_measure_shifted_output(output, self.tokenizer.tok2idx['gak:1'], self.tokenizer.tok2idx['gak:3'], self.tokenizer.tok2idx['prev|'])
+      if self.is_abc:
+        prev_generation = self.get_measure_shifted_output(output, self.tokenizer.tok2idx['gak:1'], self.tokenizer.tok2idx['gak:3'], self.tokenizer.tok2idx['beat:0'])
+      else: 
+        prev_generation = self.get_measure_shifted_output(output, self.tokenizer.tok2idx['gak:1'], self.tokenizer.tok2idx['gak:3'], self.tokenizer.tok2idx['prev|'])
       outputs.append(sel_out)
     outputs.append(self.get_measure_specific_output(output, self.tokenizer.tok2idx[f'gak:3'])) # add last measure
     outputs_tensor = torch.cat(outputs, dim=0)
@@ -140,8 +149,8 @@ class Generator:
       if output[j][-2] == measure_idx_end:
         break
     output_tokens_from_second_measure = output[i:j].clone()
-    output_tokens_from_second_measure[0, 0] = 1
-    output_tokens_from_second_measure[0, 1] = initial_prev_pos
+    output_tokens_from_second_measure[0, 0] = 1 # start token의 인덱스
+    output_tokens_from_second_measure[0, 1] = initial_prev_pos #beat 0의 인덱스
     output_tokens_from_second_measure[:, -2] -= 1 # gak_idx is -2
     return output_tokens_from_second_measure
   
