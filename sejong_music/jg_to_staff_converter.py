@@ -4,10 +4,11 @@ from collections import OrderedDict, Counter
 from typing import Any, List, Union, Tuple
 
 import music21
-from music21 import note as mnote, stream as mstream, meter as mmeter, key as mkey, pitch as mpitch
+from music21 import note as mnote, stream as stream, meter as mmeter, key as mkey, pitch as mpitch
 
-from .constants import POSITION, PITCH
-
+from .constants import POSITION, PITCH, DURATION
+from .jeonggan_utils import JGConverter, GencodeConverter
+from .abc_utils import ABCNote
 
 class JGCodeToOMRDecoder:
   pos_tokens = POSITION
@@ -159,7 +160,7 @@ class Note:
                         ':21': Fraction(2, 9),
                         ':22': Fraction(5, 9),
                         ':23': Fraction(8, 9)}
-  def __init__(self, pitch:List[str], pos:str, global_jg_offset:int, jg_offset:int, gak_offset:int) -> None:
+  def __init__(self, pitch:List[str], pos:str, global_jg_offset:int, jg_offset:int, gak_offset:int, duration:float=None) -> None:
     assert type(pitch) == list
     self.pitch = pitch[0]
     self.pos = pos
@@ -187,7 +188,6 @@ class Note:
   @property
   def offset(self):
     return self.global_jg_offset + self.beat_offset
-  
   
 
 class ThreeColumnDetector:
@@ -238,7 +238,7 @@ PITCH2MIDI = define_pitch2midi()
 
 
 class SigimsaeConverter:
-  def __init__(self, scale=['황', '태', '중', '임', '남', '무'], exceptional_pitches=[]):
+  def __init__(self, scale=['황', '태', '중', '임', '남'], exceptional_pitches=[]):
     self.scale = scale
     self.pitch2midi = OrderedDict({scale: PITCH2MIDI[scale] for scale in self.scale})
     octave_name = {"하하배": -3, "하배": -2, "배":-1, '':0, '청':+1, '중청':+2}
@@ -325,10 +325,12 @@ class JGToStaffConverter:
   pos_tokens = POSITION[2:] # exclude '|', '\n'
   pitch_converter = SigimsaeConverter()
   pitch_names = ["황" ,'대' ,'태' ,'협' ,'고' ,'중' ,'유' ,'임' ,'이' ,'남' ,'무' ,'응']
+  dur_tokens = DURATION
 
   
-  def __init__(self, dur_ratio=1.5) -> None:
+  def __init__(self, dur_ratio=1.5, is_abc=False) -> None:
     self.dur_ratio = dur_ratio
+    self.is_abc = is_abc
 
   @staticmethod
   def _append_note(prev_note, prev_pos, global_jg_offset, jg_offset, gak_offset, total_notes):
@@ -381,7 +383,7 @@ class JGToStaffConverter:
     if isinstance(pitch, str):
       pitch = self.pitch_converter.pitch2midi[pitch]
     m21_note = mnote.Note(pitch=pitch, duration=music21.duration.Duration(duration * self.dur_ratio))
-    if grace:
+    if grace or duration == 0:
       m21_note = m21_note.getGrace()
     return m21_note
     
@@ -565,7 +567,7 @@ class JGToStaffConverter:
     exceptional_pitches = [x for x in pitch_counter.keys() if x not in most_five_common]
     return most_five_common, exceptional_pitches
   
-  def parse_scale(self, scale:Union[List[str], str]):
+  def parse_scale(self, scale:Union[List[str], str]) -> List[str]:
     if scale is None:
       return scale
     if isinstance(scale, str):
@@ -577,7 +579,7 @@ class JGToStaffConverter:
                tokens:Union[List[str], str], 
                time_signatures:str='3/8', 
                key_signature:int=-4,
-               scale=None,
+               scale:Union[str, List[str]]=None,
                verbose=False) -> Tuple[List[Note], music21.stream.Stream]:
 
     if isinstance(tokens, str):
@@ -596,6 +598,50 @@ class JGToStaffConverter:
     self.create_m21_notes(notes, verbose=verbose)
     stream = self.convert_m21_notes_to_stream(notes)
     return notes, stream
+  
+  def convert_abc_tokens(self, tokens:List[str],
+                         time_signatures:str='3/8', 
+                         key_signature:int=-4,
+                         scale=None,
+                         verbose=False):
+    notes = self.convert_abc_tokens_to_notes(tokens)
+    scale = self.parse_scale(scale)
+    if scale is None:
+      scale, exceptional_pitches = self.get_scale(notes)
+    if len(scale) < 4:
+      self.pitch_converter = SigimsaeConverter()
+    else:
+      self.pitch_converter = SigimsaeConverter(scale=scale, exceptional_pitches=exceptional_pitches)
+
+    self.create_m21_notes(notes, verbose=verbose)
+    stream = self.convert_m21_notes_to_stream(notes)
+
+    return notes, stream
+  
+  def convert_abc_tokens_to_notes(self, tokens:List[str]):
+    global_offset = 0
+    jg_offset = 0
+    gak_offset = 0
+    prev_note = []
+    total_notes = []
+
+    for token in tokens:
+      if token == '' or token in ('pad', 'start', 'end'): continue
+      if token in self.dur_tokens:
+        duration = token
+        if prev_note:
+          total_notes.append(ABCNote(prev_note, duration, global_offset, jg_offset//1, gak_offset))
+          prev_note = []
+        global_offset += duration
+        jg_offset += duration
+      elif token  == '\n':
+        gak_offset += 1
+        jg_offset = 0
+      else:
+        prev_note.append(token)
+    return total_notes
+
+  
   
   def convert_multi_track(self, tokens, scale=None, verbose=False):
     if isinstance(tokens, str):
@@ -828,7 +874,6 @@ class JeongganboParser:
   
   def __call__(self, token_str:str):
     sb_reader = SymbolReader()
-    jeonggans 
     for i, jeonggan in enumerate(piece.jeonggans):
       if i == 1920: # In Yeominlak, this is where the tempo changes
         sb_reader.handle_remaining_note(i)
@@ -847,3 +892,33 @@ def piece_to_txt(piece):
   symbols_in_gaks = '\n'.join(symbols_in_gaks)
   return symbols_in_gaks
 
+class ABCtoGenConverter:
+  def __init__(self):
+    self.to_omr_converter = JGConverter(jeonggan_quarter_length=Fraction(1.0))
+    self.gencode_converter = GencodeConverter()
+    self.decoder = JGToStaffConverter()
+  
+  @staticmethod
+  def group_by_attribute(alist:List, attribute:str):
+    outputs = []
+    prev_attribute = None
+    for a in alist:
+      if prev_attribute is None:
+        prev_attribute = getattr(a, attribute)
+        outputs.append([a])
+      elif getattr(a, attribute) == prev_attribute:
+        outputs[-1].append(a)
+      else:
+        prev_attribute = getattr(a, attribute)
+        outputs.append([a])
+    return outputs
+  
+  def __call__(self, tokens:List[str]):
+    notes, _ = self.decoder.convert_abc_tokens(tokens)
+    note_by_measure = self.group_by_attribute(notes, 'gak_offset')
+    part_text = []
+    for i, note_in_measure in enumerate(note_by_measure):
+      conv_jgs = self.to_omr_converter.list_of_abc_notes_to_jeonggan(note_in_measure)
+      text_jgs = self.to_omr_converter.jeonggan_note_to_text(conv_jgs)
+      part_text.append('|'.join(text_jgs))
+    return self.gencode_converter.convert_lines_to_gencode(part_text)

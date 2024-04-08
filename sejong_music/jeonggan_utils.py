@@ -1,8 +1,9 @@
 from typing import List
 import copy
 import music21
-
+from fractions import Fraction
 from .utils import apply_tie, Gnote
+from .abc_utils import ABCNote
 
 class JGConverter:
   def __init__(self, jeonggan_quarter_length=1.5, num_jeonggan_per_gak=20):
@@ -44,6 +45,15 @@ class JGConverter:
       cur_jg = conv_jgs[int(note.offset//self.jql)]
       jg_offset = note.offset % self.jql
       cur_jg.append(((self.MIDI2PITCH[note.pitch]), note.duration, jg_offset))
+      # cur_jg.append(((self.MIDI2PITCH[note.pitch.midi]), note.duration.quarterLength, jg_offset))
+    return conv_jgs
+
+  def list_of_abc_notes_to_jeonggan(self, sel_meas:List[ABCNote]): 
+    conv_jgs = [[] for _ in range(self.num_jeonggan_per_gak)]
+    for note in sel_meas:
+      cur_jg = conv_jgs[int(note.offset//self.jql)]
+      beat_offset = note.global_offset % self.jql
+      cur_jg.append(  ('_'.join([note.pitch] + note.ornaments), note.duration, Fraction(beat_offset).limit_denominator(6) )  )
       # cur_jg.append(((self.MIDI2PITCH[note.pitch.midi]), note.duration.quarterLength, jg_offset))
     return conv_jgs
 
@@ -214,11 +224,11 @@ class GencodeConverter:
     return ' '.join(outputs)
 
   @classmethod
-  def convert_line_to_gencode(cls, line):
+  def convert_line_to_gencode(cls, line:str):
     return ' | '.join([cls.convert_jg_to_gencode(jg) for jg in cls.split_line_to_jg(line)])
     
   @classmethod
-  def convert_lines_to_gencode(cls, lines):
+  def convert_lines_to_gencode(cls, lines:List[str]):
     return ' \n '.join([cls.convert_line_to_gencode(line) for line in lines])
   
   @classmethod

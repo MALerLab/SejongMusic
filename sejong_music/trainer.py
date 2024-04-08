@@ -11,7 +11,7 @@ from music21 import stream, environment
 from .metric import get_similarity_with_inference, get_correspondence_with_inference
 from .utils import make_dynamic_template
 from .constants import MEAS_LEN_BY_IDX, get_dynamic_template_for_orch
-from .inference import sequential_inference, Inferencer, JGInferencer
+from .inference import sequential_inference, Inferencer, JGInferencer, JGSimpleInferencer, ABCInferencer
 # from .yeominrak_processing import SamplingScore
 from .evaluation import fill_pitches
 from .decode import MidiDecoder, OrchestraDecoder
@@ -509,9 +509,12 @@ class JeongganTrainer(Trainer):
                save_log=True, 
                scheduler=None, 
                clip_grad_norm=1,
+               use_fp16=True, 
                epoch_per_infer=50,
                min_epoch_for_infer=5,
-               use_fp16=True):
+               is_pos_counter=False, 
+               is_abc=False):
+
     super().__init__(model, 
                      optimizer, 
                      loss_fn, 
@@ -525,8 +528,13 @@ class JeongganTrainer(Trainer):
                      epoch_per_infer=epoch_per_infer,
                      min_epoch_for_infer=min_epoch_for_infer,
                      use_fp16=use_fp16)
-    self.inferencer = JGInferencer(model, True, True, 1.0, 0.9)
-    self.decoder = JGToStaffConverter(dur_ratio=1.5)
+    if is_abc:
+      self.inferencer = ABCInferencer(model, True, True, 1.0, 0.9)
+    elif is_pos_counter:
+      self.inferencer = JGInferencer(model, True, True, 1.0, 0.9)
+    else:  
+      self.inferencer = JGSimpleInferencer(model, True, True, 1.0, 0.9)
+    self.decoder = JGToStaffConverter(dur_ratio=1.5, is_abc=is_abc)
     
   
   
@@ -600,7 +608,7 @@ class JeongganTrainer(Trainer):
         print(f"Error occured in inference result: {e}")
         print(src)
         print(output)
-        print([note[2] for note in output])
+        # print([note[2] for note in output])
         is_match = False
       note_acc.append(jg_note_acc)
       onset_f1_score.append(f1)
