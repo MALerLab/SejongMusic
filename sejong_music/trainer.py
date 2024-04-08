@@ -16,6 +16,7 @@ from .inference import sequential_inference, Inferencer, JGInferencer
 from .evaluation import fill_pitches
 from .decode import MidiDecoder, OrchestraDecoder
 from .jg_to_staff_converter import JGToStaffConverter
+from .eval_metrics import per_jg_note_acc, onset_f1
 
 
 us=environment.UserSettings()
@@ -130,10 +131,9 @@ class Trainer:
       
       if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0 and iteration  > self.min_epoch_for_infer * num_iter_per_epoch:
         self.model.eval()
-        measure_match, similarity, dynamic_corr = self.make_inference_result()
-        if similarity > self.best_pitch_sim:
-          self.best_pitch_sim = similarity
-          torch.save(self.model.state_dict(), self.save_dir / 'best_pitch_sim_model.pt')
+        valid_metrics:dict = self.make_inference_result()
+        if self.save_log:
+          wandb.log(valid_metrics, step=self.iteration)
         self.model.train()
     
   def train_by_num_epoch(self, num_epochs):
@@ -176,15 +176,9 @@ class Trainer:
         torch.save(self.model.state_dict(), self.save_dir / f'epoch{epoch+1}_model.pt')
       
       if (epoch + 1) % self.epoch_per_infer == 0 and epoch > self.min_epoch_for_infer:
-        measure_match, similarity, dynamic_corr = self.make_inference_result()
-        if similarity > self.best_pitch_sim:
-          self.best_pitch_sim = similarity
-          torch.save(self.model.state_dict(), self.save_dir / 'best_pitch_sim_model.pt')
-        # try:
-        #   self.make_inference_result(epoch)
-        #   print('Inference Result Saved!')
-        # except:
-        #   print('Inference Result Failed to Save')
+        valid_metrics:dict = self.make_inference_result()
+        if self.save_log:
+          wandb.log(valid_metrics, step=self.iteration)
       self.model.to(self.device)
     torch.save(self.model.state_dict(), self.save_dir / 'last_model.pt')
     return attn_map
@@ -288,7 +282,7 @@ class Trainer:
       wandb.log({'dynamic_similarity': dynamic_corr}, step=self.iteration)
     
     self.model.to(self.device)
-    return measure_match, similarity, dynamic_corr
+    return {'measure match': measure_match, 'similarity': similarity, 'dynamic_corr': dynamic_corr}
 
   def make_sequential_inference_result(self, write_png=False):
     self.model.cpu()
@@ -498,13 +492,9 @@ class OrchestraTrainer(Trainer):
     self.pitch_similarity.append(similarity)
     self.dynamic_similarity.append(dynamic_corr)
     
-    if self.save_log:
-      wandb.log({'measure_match': measure_match}, step=self.iteration)
-      wandb.log({'pitch_similarity': similarity}, step=self.iteration)
-      wandb.log({'dynamic_similarity': dynamic_corr}, step=self.iteration)
-    
+
     self.model.to(self.device)
-    return measure_match, similarity, dynamic_corr
+    return {'measure match': measure_match, 'similarity': similarity, 'dynamic_corr': dynamic_corr}    
 
 
 class JeongganTrainer(Trainer):
@@ -576,25 +566,29 @@ class JeongganTrainer(Trainer):
     self.model.eval()
     print('Best Model Loaded!')
 
-  def make_inference_result(self, write_png=True, loader=None):
+  def make_inference_result(self, write_png=False, loader=None):
     if loader is None:
       loader = self.valid_loader
     # self.model.to('cpu')
     # for idx in range(self.valid_loader.batch_size):
-    selected_idx_list = [i for i in range(10)]
-    measure_match = []
-    similarity = []
-    dynamic_corr = []
+    selected_idx_list = [i for i in range(len(loader.dataset))]
+    note_acc = []
+    onset_f1_score = []
+    onset_prec_score = []
+    onset_recall_score = []
     # dynamic_templates = make_dynamic_template(offset_list=MEAS_LEN_BY_IDX)
     for idx in selected_idx_list:
       sample, tgt, shifted_tgt = loader.dataset[idx]
-      # if isinstance(self.train_loader.dataset, SamplingScore):
-      #   target = self.model.converter(target)
-      # else:
       input_part_idx = sample[0][-1]
       target_part_idx = self.model.tokenizer.vocab[tgt[0][-1].item()]
       # if input_part_idx < 2: continue
-      src, output, attn_map = self.inferencer.inference(sample.to(self.device), target_part_idx)
+      src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
+      try:
+        jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+        f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+      except:
+        jg_note_acc = 0
+        f1, prec, recall = 0, 0, 0
       try:
         note_dict, stream = self.decoder.convert_inference_result(output, src, self.model.tokenizer.decode(shifted_tgt))
         if write_png:
@@ -608,7 +602,10 @@ class JeongganTrainer(Trainer):
         print(output)
         print([note[2] for note in output])
         is_match = False
-
+      note_acc.append(jg_note_acc)
+      onset_f1_score.append(f1)
+      onset_prec_score.append(prec)
+      onset_recall_score.append(recall)
       # if self.model.is_condition_shifted:
       #   src, output, attn_map = self.model.shifted_inference(sample.to(self.device), target_part_idx)
       # else:
@@ -641,7 +638,13 @@ class JeongganTrainer(Trainer):
           wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
                     step=self.iteration)
       '''
-    return 0, 0, 0
+    
+    note_acc = sum(note_acc)/len(note_acc)
+    onset_f1_score = sum(onset_f1_score)/len(onset_f1_score)
+    onset_prec_score = sum(onset_prec_score)/len(onset_prec_score)
+    onset_recall_score = sum(onset_recall_score)/len(onset_recall_score)
+    
+    return {'note_acc': note_acc, 'onset_f1': onset_f1_score, 'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score}
 
 class BertTrainer(JeongganTrainer):
   def __init__(self, 

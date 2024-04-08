@@ -249,6 +249,7 @@ class JeongganDataset:
               feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
               # target_instrument='daegeum',
               num_max_inst:int=5,
+              augment_param=None,
               position_tokens=POSITION,
               piece_list:List[JeongganPiece]=None,
               tokenizer:JeongganTokenizer=None):
@@ -373,7 +374,7 @@ class JeongganDataset:
       condition_instruments = insts_of_piece[1:]
     else:
       target_instrument = random.choice(insts_of_piece)
-      condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, len(insts_of_piece)-2))
+      condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, len(insts_of_piece)-1))
 
     
     src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)          
