@@ -593,7 +593,7 @@ class JeongganTrainer(Trainer):
       try:
         src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
       except:
-        print(f"Error occured in inference result: {e}")
+        print(f"Error occured in inference precess")
         # print([note[2] for note in output])
       try:
         jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
