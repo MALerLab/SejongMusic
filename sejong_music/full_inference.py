@@ -15,7 +15,7 @@ from sejong_music.yeominrak_processing import OrchestraScoreSeq, ShiftedAlignedS
 from sejong_music.model_zoo import JeongganTransSeq2seq
 from sejong_music.decode import MidiDecoder, OrchestraDecoder
 from sejong_music.inference import JGInferencer
-from sejong_music.jg_to_staff_converter import JGToStaffConverter, JGCodeToOMRDecoder, ABCtoGenConverter
+from sejong_music.jg_to_staff_converter import JGToStaffConverter, JGCodeToOMRDecoder, ABCtoGenConverter, BeatToGenConverter
 from sejong_music.jg_code import JeongganDataset, JeongganTokenizer, JeongganPiece, ABCPiece, ABCDataset
 from sejong_music.jeonggan_utils import JGConverter, GencodeConverter
 
@@ -31,19 +31,23 @@ class Generator:
       self.model = self._load_model()
       self.tokenizer = self.model.tokenizer
       self.inferencer = self._get_inferencer()
+      self.use_offset = config.use_offset
     else:
       self.model = model
       self.tokenizer = self.model.tokenizer
       self.inferencer = inferencer
       self.output_dir = output_dir
+      self.use_offset = 'beat:0' in self.tokenizer.vocab
     self.jg_converter = JGConverter(jeonggan_quarter_length=1.5)
     self.gen_converter = GencodeConverter()
     self.jg_to_staff_converter = JGToStaffConverter()
     self.jg_to_omr_converter = JGCodeToOMRDecoder()
+    self.beat_to_gen_converter = BeatToGenConverter()
     
   
   def _load_model(self):
-    model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter72000_model.pt'
+    # model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter72000_model.pt'
+    model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter34800_model.pt'
     tokenizer_vocab_path = Path(self.config.inst_state_dir) / 'tokenizer_vocab.json'
     model_config_path = Path(self.config.inst_state_dir) / 'config.yaml'
     tokenizer:JeongganTokenizer = getattr(jg_code, self.config.class_names.tokenizer)(None, None, json_fn=tokenizer_vocab_path)
@@ -76,8 +80,9 @@ class Generator:
       piece = ABCPiece(None, gen_str=gen_str, inst_list=inst_list)
       dataset = ABCDataset(piece_list=[piece], tokenizer=self.tokenizer)
     else:
-      piece = JeongganPiece(None, gen_str=gen_str, inst_list=inst_list)
-      dataset = JeongganDataset(piece_list=[piece], tokenizer=self.tokenizer)
+      piece = JeongganPiece(None, gen_str=gen_str, inst_list=inst_list, use_offset=self.use_offset)
+      dataset = JeongganDataset(piece_list=[piece], tokenizer=self.tokenizer, use_offset=self.use_offset)
+
     
     return dataset
   
@@ -91,7 +96,7 @@ class Generator:
 
     for i in tqdm(range(len(dataset))):
     # for i in tqdm(range(10)):
-      sample, _, _ = dataset.get_processed_feature(condition_instruments, condition_instruments[0], i)  
+      sample, _, _ = dataset.get_processed_feature(condition_instruments, condition_instruments[0], i, force_target_inst=target_inst)  
       sample = torch.LongTensor(sample)        
       _, output_decoded, (attention_map, output, new_out) = self.inferencer.inference(sample, target_inst, prev_generation=prev_generation)
       print(output_decoded)
@@ -125,8 +130,13 @@ class Generator:
         decoded_str = self.jg_decoder(outputs_tensor)
         gen_str = decoded_str[:,0] + ' \n\n ' + gen_str
         
+      if self.use_offset:
+        beat_tokens = self.tokenizer.decode(outputs_tensor[:, 0])
+        new_gen_str = self.beat_to_gen_converter(beat_tokens)
+        gen_str = new_gen_str + ' \n\n ' + gen_str
       else:
         gen_str = ' '.join(self.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
+    
     return gen_str
     
 
@@ -136,6 +146,31 @@ class Generator:
     '''
     gen_str = self.convert_xml_to_gen_code(score_fn, part_idx)
     gen_str = self.make_inst_sequential_inference(gen_str, target_order)
+    return gen_str
+  
+  def inference_from_gen_code(self, text_fn, target_order:List[str]):
+    with open(text_fn, 'r') as f:
+      gen_str = f.read()
+    gen_str = self.make_inst_sequential_inference(gen_str, target_order)
+    return gen_str
+  
+  def cycle_inference_from_gen_code(self, text_fn, inst_cycles:List[str]=['piri', 'geomungo', 'gayageum', 'ajaeng', 'haegeum', 'daegeum'], num_cycles:int=6):
+    with open(text_fn, 'r') as f:
+      gen_str = f.read()
+      
+    for i in range(num_cycles):
+      gen_str = '\n\n'.join(gen_str.split('\n\n')[:-1])
+      inst_list = list(reversed(inst_cycles[1:]))
+      target_inst = inst_cycles[0]
+      print(inst_list, target_inst)
+      dataset = gen.prepare_dataset(gen_str, inst_list=inst_list) # reverse order
+      outputs_tensor = gen.make_full_inference_on_dataset(dataset, 
+                                                            target_inst=target_inst, 
+                                                            condition_instruments=inst_list)
+      gen_str = ' '.join(gen.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
+      new_cycles = copy.copy(inst_cycles[1:]) + copy.copy([inst_cycles[0]])
+      inst_cycles = new_cycles
+    
     return gen_str
 
   @staticmethod
@@ -162,22 +197,51 @@ class Generator:
   
 
 
+
 if __name__ == '__main__':
   config = OmegaConf.load('yamls/gen_settings/jg_cph.yaml')
+  out_dir = Path('gen_results/')
+  out_dir.mkdir(parents=True, exist_ok=True)
+  name = 'cph_bert_daegeum_first'
+  inst_cycles = ['piri', 'daegeum',  'haegeum', 'geomungo', 'gayageum', 'ajaeng']
 
   gen = Generator(config)
-  score_fn = 'gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml'
   gen.model.to('cuda')
-  output_str = gen.inference_from_xml(score_fn, ['geomungo', 'gayageum', 'ajaeng', 'haegeum', 'piri', 'daegeum'])
-  
-  with open('gen_results/CHP_scoreCPH_from_1_0308-1209_gencode.txt', 'w') as f:
+  txt_fn = 'music_score/chwipunghyeong_bert_gen.txt'
+  output_str = gen.inference_from_gen_code(txt_fn, inst_cycles)
+  with open(out_dir / f'{name}_gen.txt', 'w') as f:
     f.write(output_str)
-  
-  jg_omr_str = gen.jg_to_omr_converter.convert_multi_inst_str(output_str)
-  with open('gen_results/CHP_scoreCPH_from_1_0308-1209_omr.txt', 'w') as f:
-    f.write(jg_omr_str)
-  
-  notes, score = gen.jg_to_staff_converter(output_str)
 
-  score.write('musicxml', 'gen_results/CHP_scoreCPH_from_1_0308-1209_write.musicxml')
+  jg_omr_str = gen.jg_to_omr_converter.convert_multi_inst_str(output_str)
+  with open(out_dir / f'{name}_omr.txt', 'w') as f:
+    f.write(jg_omr_str)
+
+  notes, score = gen.jg_to_staff_converter.convert_multi_track(output_str, time_signature='30/8')
+
+  txt_fn = 'gen_results/chwipunghyeong_bert_orchestration_gencode5.txt'
+  output_str = gen.cycle_inference_from_gen_code(txt_fn, inst_cycles=inst_cycles, num_cycles=6)
+  with open(out_dir / f'{name}_cycle_gen.txt', 'w') as f:
+    f.write(output_str)
+
+  jg_omr_str_cycle = gen.jg_to_omr_converter.convert_multi_inst_str(output_str)
+  with open(out_dir / f'{name}_cycle_omr.txt', 'w') as f:
+    f.write(jg_omr_str_cycle)
+  
+  cycle_notes, cycle_score = gen.jg_to_staff_converter.convert_multi_track(output_str, time_signature='30/8')
+  cycle_score.write('musicxml', out_dir / f'{name}_cycle.musicxml')
+  score.write('musicxml', out_dir / f'{name}.musicxml' )
+  
+  # score_fn = 'gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml'
+  # output_str = gen.inference_from_xml(score_fn, ['geomungo', 'gayageum', 'ajaeng', 'haegeum', 'piri', 'daegeum'])
+
+  # with open('gen_results/CHP_scoreCPH_from_1_0308-1209_gencode.txt', 'w') as f:
+  #   f.write(output_str)
+  
+  # jg_omr_str = gen.jg_to_omr_converter.convert_multi_inst_str(output_str)
+  # with open('gen_results/CHP_scoreCPH_from_1_0308-1209_omr.txt', 'w') as f:
+  #   f.write(jg_omr_str)
+  
+  # notes, score = gen.jg_to_staff_converter(output_str)
+
+  # score.write('musicxml', 'gen_results/CHP_scoreCPH_from_1_0308-1209_write.musicxml')
   

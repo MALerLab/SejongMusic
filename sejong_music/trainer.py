@@ -596,24 +596,32 @@ class JeongganTrainer(Trainer):
         print(f"Error occured in inference precess")
         # print([note[2] for note in output])
       try:
-        jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-        f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+        if self.inferencer.use_offset:
+          shifted_tgt = self.inferencer.beat2gen(self.inferencer.tokenizer.decode(shifted_tgt)).split(' ') 
+          shifted_tgt = [x for x in shifted_tgt if x != ''] + ['\n']
+          out_decoded = [x[0] for x in out_decoded]
+          jg_note_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          f1, prec, recall = onset_f1(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+
+        else:
+          jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
       except:
         jg_note_acc = 0
         f1, prec, recall = 0, 0, 0
-      try:
-        note_dict, stream = self.decoder.convert_inference_result(output, src, self.model.tokenizer.decode(shifted_tgt))
-        if write_png:
-          stream.write('musicxml.png', fp=str(self.save_dir / f'{input_part_idx}-{target_part_idx}.png'))
-          if self.save_log:
-            wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
-                      step=self.iteration)
-      except Exception as e:
-        print(f"Error occured in inference result: {e}")
-        print(src)
-        print(output)
-        # print([note[2] for note in output])
-        is_match = False
+      # try:
+      #   note_dict, stream = self.decoder.convert_inference_result(output, src, self.model.tokenizer.decode(shifted_tgt))
+      #   if write_png:
+      #     stream.write('musicxml.png', fp=str(self.save_dir / f'{input_part_idx}-{target_part_idx}.png'))
+      #     if self.save_log:
+      #       wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
+      #                 step=self.iteration)
+      # except Exception as e:
+      #   print(f"Error occured in inference result: {e}")
+      #   print(src)
+      #   print(output)
+      #   # print([note[2] for note in output])
+      #   is_match = False
       note_acc.append(jg_note_acc)
       onset_f1_score.append(f1)
       onset_prec_score.append(prec)
