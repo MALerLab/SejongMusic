@@ -360,6 +360,7 @@ class JeongganDataset:
     self.is_valid = is_valid
     self.position_tokens = position_tokens
     self.is_pos_counter = is_pos_counter
+    self.is_summarize = is_summarize
     self.use_offset = use_offset
     self.num_max_inst = num_max_inst
     if self.use_offset: 
@@ -474,6 +475,13 @@ class JeongganDataset:
       
       return combined
 
+  def summarize_position_tokens(self, note_list:List[List[str]]):
+    filtered = []
+    position_tokens = [pos for pos in POSITION if pos not in ['|', '\n']]
+    for note in note_list:
+      if note[0] not in position_tokens:
+        filtered.append(note)
+    return filtered
 
   def get_processed_feature(self, condition_insts: List[str], target_inst: str, idx: int, force_target_inst:str=None):
       assert isinstance(condition_insts, list), "front_part_insts should be a list"
@@ -489,9 +497,12 @@ class JeongganDataset:
       expanded_source = [x for sublist in expanded_source for x in sublist]
 
       source = [source_start_token] + expanded_source + [source_end_token]
+      if self.is_summarize:
+        source = self.summarize_position_tokens(source)
       target = self.get_inst_and_position_feature(original_target, target_inst)
       if self.is_pos_counter:
         target = self.shift_condition(target)
+        
       shifted_target = target[1:]
       target = target[:-1]
       shifted_target = [x[0] for x in shifted_target]
