@@ -955,5 +955,5 @@ class BeatToGenConverter:
       text_jgs = self.abc2gen_converter.to_omr_converter.jeonggan_note_to_text(conv_jgs)
       part_text.append('|'.join(text_jgs))
     gen_code = self.abc2gen_converter.gencode_converter.convert_lines_to_gencode(part_text)
-    # gen_code_tokens = ' '.join([x for x in gen_code.split(' ') if x != ''])
-    return gen_code
+    gen_code_tokens = ' '.join([x for x in gen_code.split(' ') if x != ''])
+    return gen_code_tokens

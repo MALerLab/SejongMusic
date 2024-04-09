@@ -609,19 +609,19 @@ class JeongganTrainer(Trainer):
       except:
         jg_note_acc = 0
         f1, prec, recall = 0, 0, 0
-      try:
-        note_dict, stream = self.decoder.convert_inference_result(output, src, self.model.tokenizer.decode(shifted_tgt))
-        if write_png:
-          stream.write('musicxml.png', fp=str(self.save_dir / f'{input_part_idx}-{target_part_idx}.png'))
-          if self.save_log:
-            wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
-                      step=self.iteration)
-      except Exception as e:
-        print(f"Error occured in inference result: {e}")
-        print(src)
-        print(output)
-        # print([note[2] for note in output])
-        is_match = False
+      # try:
+      #   note_dict, stream = self.decoder.convert_inference_result(output, src, self.model.tokenizer.decode(shifted_tgt))
+      #   if write_png:
+      #     stream.write('musicxml.png', fp=str(self.save_dir / f'{input_part_idx}-{target_part_idx}.png'))
+      #     if self.save_log:
+      #       wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
+      #                 step=self.iteration)
+      # except Exception as e:
+      #   print(f"Error occured in inference result: {e}")
+      #   print(src)
+      #   print(output)
+      #   # print([note[2] for note in output])
+      #   is_match = False
       note_acc.append(jg_note_acc)
       onset_f1_score.append(f1)
       onset_prec_score.append(prec)

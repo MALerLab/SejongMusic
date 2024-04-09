@@ -474,10 +474,13 @@ class JeongganDataset:
       return combined
 
 
-  def get_processed_feature(self, condition_insts: List[str], target_inst: str, idx: int):
+  def get_processed_feature(self, condition_insts: List[str], target_inst: str, idx: int, force_target_inst:str=None):
       assert isinstance(condition_insts, list), "front_part_insts should be a list"
       
-      source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(target_inst)
+      if force_target_inst:
+        source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(force_target_inst)
+      else:
+        source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(target_inst)
       original_source = {inst: self.entire_segments[idx][inst] for inst in condition_insts}
       original_target = self.entire_segments[idx][target_inst]
 
