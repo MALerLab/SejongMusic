@@ -15,7 +15,7 @@ from sejong_music.yeominrak_processing import OrchestraScoreSeq, ShiftedAlignedS
 from sejong_music.model_zoo import JeongganTransSeq2seq
 from sejong_music.decode import MidiDecoder, OrchestraDecoder
 from sejong_music.inference import JGInferencer
-from sejong_music.jg_to_staff_converter import JGToStaffConverter, JGCodeToOMRDecoder
+from sejong_music.jg_to_staff_converter import JGToStaffConverter, JGCodeToOMRDecoder, ABCtoGenConverter
 from sejong_music.jg_code import JeongganDataset, JeongganTokenizer, JeongganPiece, ABCPiece, ABCDataset
 from sejong_music.jeonggan_utils import JGConverter, GencodeConverter
 
@@ -23,6 +23,7 @@ from sejong_music.jeonggan_utils import JGConverter, GencodeConverter
 class Generator:
   def __init__(self, config, model=None, output_dir=None, inferencer=None, is_abc=False):
     self.is_abc = is_abc
+    self.jg_decoder = ABCtoGenConverter()
     if config:
       self.config = config
       self.output_dir = Path(config.output_dir)
@@ -93,6 +94,7 @@ class Generator:
       sample, _, _ = dataset.get_processed_feature(condition_instruments, condition_instruments[0], i)  
       sample = torch.LongTensor(sample)        
       _, output_decoded, (attention_map, output, new_out) = self.inferencer.inference(sample, target_inst, prev_generation=prev_generation)
+      print(output_decoded)
       if i == 0:
         sel_out = torch.cat([output[0:1]] + [self.get_measure_specific_output(output, self.tokenizer.tok2idx[f'gak:{i}']) for i in range(0,3)], dim=0)
       else:
@@ -119,8 +121,12 @@ class Generator:
       outputs_tensor = self.make_full_inference_on_dataset(dataset, 
                                                            target_inst=inst, 
                                                            condition_instruments=target_order[:i])
-      gen_str = ' '.join(self.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
-    
+      if self.is_abc:
+        decoded_str = self.jg_decoder(outputs_tensor)
+        gen_str = decoded_str[:,0] + ' \n\n ' + gen_str
+        
+      else:
+        gen_str = ' '.join(self.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
     return gen_str
     
 
