@@ -125,3 +125,44 @@ def count_cooccurrences(piece:JeongganPiece, ignore_octaves=True):
   
   counts = Counter(counts)
   return counts, max(counts.keys())
+
+
+def get_note_length_stats(piece:JeongganPiece):
+  '''
+  Calculates note length statistics for a given piece.
+  
+  Args:
+    piece: JeongganPiece object
+  
+  Returns:
+    dict {instrument: [mean, std, notes_per_jeonggan]}
+  '''
+  rolls = [piece.convert_tokens_to_roll(part, inst) for part, inst in zip(piece.tokenized_parts, piece.inst_list)]
+  rolls = [roll[:, 0] for roll in rolls]
+  num_jg = len(rolls[0]) // 6
+  lengths = {inst: [] for inst in piece.inst_list}
+  stats = {inst: [] for inst in piece.inst_list}
+  for roll, inst in zip(rolls, piece.inst_list):
+    roll[~np.isin(roll, PITCH+['쉼표'])] = '-'
+    note_on = False 
+    cur_length = 0
+    for i, note in enumerate(roll):
+      if note == '-':
+        if note_on:
+          cur_length += 1
+      if note == '쉼표':
+        if note_on:
+          lengths[inst].append(cur_length)
+          cur_length = 0
+          note_on = False
+      if note in PITCH:
+        if note_on:
+          lengths[inst].append(cur_length)
+          cur_length = 1
+        else:
+          note_on = True
+          cur_length = 1
+    stats[inst] = [np.mean(lengths[inst]), np.std(lengths[inst]), len(lengths[inst]) / num_jg]
+  total_lengths = np.concatenate([lengths[inst] for inst in piece.inst_list])
+  stats['total'] = [np.mean(total_lengths), np.std(total_lengths), len(total_lengths) / num_jg]
+  return stats
