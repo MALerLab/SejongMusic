@@ -27,6 +27,7 @@ data:
   is_pos_counter: True
   num_max_inst: 4
   use_offset: False
+  summarize_position: False
 
 model:
   dim: 64

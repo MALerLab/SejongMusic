@@ -349,7 +349,8 @@ class JeongganDataset:
               piece_list:List[JeongganPiece]=None,
               tokenizer:JeongganTokenizer=None, 
               is_pos_counter=True,
-              use_offset=False,):
+              use_offset=False,
+              is_summarize=False):
     
     data_path = Path(data_path)
     self.data_path = data_path
@@ -575,7 +576,8 @@ class ABCDataset(JeongganDataset):
               tokenizer:JeongganTokenizer=None, 
               is_pos_counter=True,
               augment_param=None,
-              num_max_inst=6):
+              num_max_inst=6,
+              is_summarize=None):
     super().__init__(data_path=data_path, 
                      slice_measure_num=slice_measure_num, 
                      is_valid=is_valid, 
@@ -586,7 +588,8 @@ class ABCDataset(JeongganDataset):
                      position_tokens=position_tokens, 
                      piece_list=piece_list, 
                      tokenizer=tokenizer, 
-                     is_pos_counter=is_pos_counter)
+                     is_pos_counter=is_pos_counter,
+                     is_summarize=is_summarize)
     if self.is_pos_counter:
       self.feature_types = feature_types
     else:
