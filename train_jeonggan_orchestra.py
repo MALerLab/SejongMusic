@@ -90,7 +90,7 @@ def main(config: DictConfig):
                             batch_size=config.train.batch_size , 
                             shuffle=True, 
                             collate_fn=collate_fn,
-                            num_workers=4)
+                            num_workers=2)
   valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=True)
 
   device = 'cuda'
@@ -135,7 +135,7 @@ def main(config: DictConfig):
                                 scheduler=scheduler, 
                                 use_fp16=(device=='cuda'),
                                 is_pos_counter = config.data.is_pos_counter,
-                                epoch_per_infer=50,
+                                epoch_per_infer=5,
                                 min_epoch_for_infer=5,
                                 is_abc=dataset_class==ABCDataset, # 이거 확인!
                                 )

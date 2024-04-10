@@ -38,8 +38,8 @@ class Trainer:
                save_log=True, 
                scheduler=None, 
                clip_grad_norm=1.0,
-               epoch_per_infer=50,
-               min_epoch_for_infer=250,
+               epoch_per_infer=5,
+               min_epoch_for_infer=5,
                use_fp16=False):
   # def __init__(self, **kwargs):
   #   for key, value in kwargs.items():
@@ -126,8 +126,9 @@ class Trainer:
           self.best_valid_loss = validation_loss
           torch.save(self.model.state_dict(), self.save_dir / 'best_loss_model.pt')
         
-      if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0:
-        torch.save(self.model.state_dict(), self.save_dir / f'iter{iteration+1}_model.pt')
+      # if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0:
+      #   torch.save(self.model.state_dict(), self.save_dir / f'iter{iteration+1}_model.pt')
+      torch.save(self.model.state_dict(), self.save_dir / 'last_model.pt')
       
       if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0 and iteration  > self.min_epoch_for_infer * num_iter_per_epoch:
         self.model.eval()
@@ -510,7 +511,7 @@ class JeongganTrainer(Trainer):
                scheduler=None, 
                clip_grad_norm=1,
                use_fp16=True, 
-               epoch_per_infer=50,
+               epoch_per_infer=5,
                min_epoch_for_infer=5,
                is_pos_counter=False, 
                is_abc=False):
@@ -597,15 +598,20 @@ class JeongganTrainer(Trainer):
         print(f"Error occured in inference result: {e}")
         continue
         # print([note[2] for note in output])
-      num_tg_jg = sum([1 for note in self.inferencer.tokenizer(shifted_tgt) if note in ('|', '\n')])
-      num_gen_jg = sum([1 for note in output if note[0] in ('|', '\n')])
+      if isinstance(self.inferencer, ABCInferencer):
+        num_gen_jg = sum([1 for note in output if note[0] in ('|', '\n')])
+        gen_converted_tgt = self.inferencer.jg_decoder(self.inferencer.tokenizer.decode(shifted_tgt)).split(' ') + ['\n']
+        num_tg_jg = sum([1 for note in gen_converted_tgt if note in ('|', '\n')])
+      else:
+        num_tg_jg = sum([1 for note in self.inferencer.tokenizer.decode(shifted_tgt) if note in ('|', '\n')])
+        num_gen_jg = sum([1 for note in output if note[0] in ('|', '\n')])
       jg_matched.append(int(num_tg_jg == num_gen_jg))
       if num_tg_jg != num_gen_jg:
         print(f"Generated JG mismatch: num_tg_jg: {num_tg_jg}, num_gen_jg: {num_gen_jg}")
         continue
       try:
         if self.inferencer.use_offset:
-          shifted_tgt = self.inferencer.beat2gen(self.inferencer.tokenizer.decode(shifted_tgt)).split(' ') 
+          shifted_tgt = self.inferencer.beat2gen(self.inferencer.tokenizer.decode(shifted_tgt))
           shifted_tgt = [x for x in shifted_tgt if x != '']
           out_decoded = [x[0] for x in output]
           jg_note_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
@@ -667,13 +673,21 @@ class JeongganTrainer(Trainer):
           wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
                     step=self.iteration)
       '''
-    
-    note_acc = sum(note_acc)/len(note_acc)
-    onset_f1_score = sum(onset_f1_score)/len(onset_f1_score)
-    onset_prec_score = sum(onset_prec_score)/len(onset_prec_score)
-    onset_recall_score = sum(onset_recall_score)/len(onset_recall_score)
-    jg_matched_score = sum(jg_matched)/len(jg_matched)
-    
+    if len(jg_matched) == 0:
+      jg_matched_score = 0
+    else:
+      jg_matched_score = sum(jg_matched)/len(jg_matched)
+    if len(note_acc) == 0:
+      note_acc = 0
+      onset_f1_score = 0
+      onset_prec_score = 0
+      onset_recall_score = 0
+    else:
+      note_acc = sum(note_acc)/len(note_acc)
+      onset_f1_score = sum(onset_f1_score)/len(onset_f1_score)
+      onset_prec_score = sum(onset_prec_score)/len(onset_prec_score)
+      onset_recall_score = sum(onset_recall_score)/len(onset_recall_score)
+      
     return {'note_acc': note_acc, 'onset_f1': onset_f1_score, 'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score, 'jg_matched': jg_matched_score}
 
 class BertTrainer(JeongganTrainer):
@@ -688,7 +702,7 @@ class BertTrainer(JeongganTrainer):
                save_log=True, 
                scheduler=None, 
                clip_grad_norm=1,
-               epoch_per_infer=50,
+               epoch_per_infer=10,
                min_epoch_for_infer=5,
                use_fp16=True):
     super().__init__(model, 
