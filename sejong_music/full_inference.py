@@ -131,13 +131,9 @@ class Generator:
         beat_tokens = self.tokenizer.decode(outputs_tensor[:, 0])
         new_gen_str = self.beat_to_gen_converter(beat_tokens)
         gen_str = new_gen_str + ' \n\n ' + gen_str
-      else:
-        gen_str = ' '.join(self.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
-    
-      if self.is_abc:
+      elif self.is_abc:
         decoded_str = self.jg_decoder(outputs_tensor)
         gen_str = decoded_str[:,0] + ' \n\n ' + gen_str
-        
       else:
         gen_str = ' '.join(self.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
     return gen_str

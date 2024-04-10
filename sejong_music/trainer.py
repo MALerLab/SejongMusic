@@ -595,6 +595,7 @@ class JeongganTrainer(Trainer):
         src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
       except Exception as e:
         print(f"Error occured in inference result: {e}")
+        continue
         # print([note[2] for note in output])
       num_tg_jg = sum([1 for note in self.inferencer.tokenizer(shifted_tgt) if note in ('|', '\n')])
       num_gen_jg = sum([1 for note in output if note[0] in ('|', '\n')])
