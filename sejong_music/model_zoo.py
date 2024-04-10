@@ -807,15 +807,18 @@ class JeongganTransSeq2seq(Seq2seq):
     enc_out, enc_mask = self.encoder(src.unsqueeze(0))
     return {"encode_out": enc_out, "enc_mask": enc_mask, 'kv_cache': None}
 
-  def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output):
+  def _apply_prev_generation(self, prev_generation, final_tokens, encoder_output, is_abc=False):
     dev = prev_generation.device
-    start_token = torch.cat([prev_generation[-1:, :1].to(dev),  torch.LongTensor([self.tokenizer(['prev\n', 'jg:0', 'gak:2'])]).to(dev), prev_generation[-1:, -1:] ], dim=-1)
+    if is_abc:
+      start_token = torch.cat([prev_generation[-1:, :1].to(dev),  torch.LongTensor([self.tokenizer(['beat:0', 'jg:0', 'gak:2'])]).to(dev), prev_generation[-1:, -1:] ], dim=-1)
+    else:
+      start_token = torch.cat([prev_generation[-1:, :1].to(dev),  torch.LongTensor([self.tokenizer(['prev\n', 'jg:0', 'gak:2'])]).to(dev), prev_generation[-1:, -1:] ], dim=-1)
     final_tokens = torch.cat([prev_generation, start_token], dim=0)
     current_measure_idx = 2
     final_tokens = [final_tokens[i:i+1] for i in range(len(final_tokens))]
     return final_tokens, current_measure_idx, encoder_output
 
-  def shifted_inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
+  def shifted_inference(self, src, part_idx, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0), is_abc=False):
     dev = src.device
     assert src.ndim == 2
     enc_out, enc_mask = self.encoder(src.unsqueeze(0)) 
@@ -833,7 +836,7 @@ class JeongganTransSeq2seq(Seq2seq):
 
     final_tokens = [start_token]
     if prev_generation is not None:
-      final_tokens, current_measure_idx, last_hidden = self._apply_prev_generation(prev_generation, final_tokens, last_hidden, enc_out)
+      final_tokens, current_measure_idx, last_hidden = self._apply_prev_generation(prev_generation, final_tokens, last_hidden, enc_out, is_abc)
       # emb = self.decoder._get_embedding(prev_generation)
       # decode_out, last_hidden = self.decoder.rnn(emb.unsqueeze(0), last_hidden)
       # start_token = torch.cat([prev_generation[-1:, :3].to(dev),  torch.LongTensor([[3, 3, 5]]).to(dev)], dim=-1)

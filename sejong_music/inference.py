@@ -431,7 +431,7 @@ class ABCInferencer(JGInferencer):
 
     final_tokens = [start_token]
     if prev_generation is not None:
-      final_tokens, current_gak_idx, encoder_output = self.model._apply_prev_generation(prev_generation, final_tokens, encoder_output)
+      final_tokens, current_gak_idx, encoder_output = self.model._apply_prev_generation(prev_generation, final_tokens, encoder_output, is_abc=True)
     selected_token = start_token
 
     total_attention_weights = []

@@ -22,7 +22,7 @@ from sejong_music.full_inference import Generator
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
-  return f'{current_time_in_str}_dataclass={config.dataset_class}_model_depth={config.model.depth}_num_head={config.model.num_heads}_dropout={config.model.dropout}_is_pos_counter={config.data.is_pos_counter}_is_pos_enc={config.model.is_pos_enc}_{config.general.exp_name}_{config.model_class}'
+  return f'{current_time_in_str}_dataclass={config.dataset_class}_model_depth={config.model.depth}_num_head={config.model.num_heads}_dropout={config.model.dropout}_is_pos_counter={config.data.is_pos_counter}_{config.general.exp_name}_{config.model_class}'
 
 @hydra.main(config_path='yamls/', config_name='transformer_jeonggan')
 def main(config: DictConfig):
@@ -62,7 +62,8 @@ def main(config: DictConfig):
                   is_pos_counter=config.data.is_pos_counter,
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
-                  use_offset=config.data.use_offset
+                  use_offset=config.data.use_offset,
+                  is_summarize=config.data.summarize_position
                   )
   
   val_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
@@ -78,7 +79,8 @@ def main(config: DictConfig):
                   is_pos_counter=config.data.is_pos_counter,
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
-                  use_offset=config.data.use_offset
+                  use_offset=config.data.use_offset,
+                  is_summarize=config.data.summarize_position
                   )
     
   collate_fn = getattr(utils, config.collate_fn)
@@ -140,7 +142,8 @@ def main(config: DictConfig):
     generator = Generator(config=None,
                           model=model,
                           output_dir=inst_save_dir,
-                          inferencer=atrainer.inferencer
+                          inferencer=atrainer.inferencer, 
+                          is_abc = dataset_class==ABCDataset,
                           )
 
     atrainer.iteration = total_iteration
