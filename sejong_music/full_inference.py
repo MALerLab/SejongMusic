@@ -18,6 +18,7 @@ from sejong_music.inference import JGInferencer
 from sejong_music.jg_to_staff_converter import JGToStaffConverter, JGCodeToOMRDecoder, BeatToGenConverter
 from sejong_music.jg_code import JeongganDataset, JeongganTokenizer, JeongganPiece
 from sejong_music.jeonggan_utils import JGConverter, GencodeConverter
+from sejong_music.abc_utils import convert_beat_jg_to_gen
 
 
 class Generator:
@@ -40,7 +41,7 @@ class Generator:
     self.gen_converter = GencodeConverter()
     self.jg_to_staff_converter = JGToStaffConverter()
     self.jg_to_omr_converter = JGCodeToOMRDecoder()
-    self.beat_to_gen_converter = BeatToGenConverter()
+    self.beat_to_gen_converter = convert_beat_jg_to_gen
     
   
   def _load_model(self):

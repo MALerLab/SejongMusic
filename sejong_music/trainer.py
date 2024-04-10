@@ -584,6 +584,7 @@ class JeongganTrainer(Trainer):
     onset_f1_score = []
     onset_prec_score = []
     onset_recall_score = []
+    jg_matched = []
     # dynamic_templates = make_dynamic_template(offset_list=MEAS_LEN_BY_IDX)
     for idx in selected_idx_list:
       sample, tgt, shifted_tgt = loader.dataset[idx]
@@ -595,18 +596,25 @@ class JeongganTrainer(Trainer):
       except Exception as e:
         print(f"Error occured in inference result: {e}")
         # print([note[2] for note in output])
+      num_tg_jg = sum([1 for note in self.inferencer.tokenizer(shifted_tgt) if note in ('|', '\n')])
+      num_gen_jg = sum([1 for note in output if note[0] in ('|', '\n')])
+      jg_matched.append(int(num_tg_jg == num_gen_jg))
+      if num_tg_jg != num_gen_jg:
+        print(f"Generated JG mismatch: num_tg_jg: {num_tg_jg}, num_gen_jg: {num_gen_jg}")
+        continue
       try:
         if self.inferencer.use_offset:
           shifted_tgt = self.inferencer.beat2gen(self.inferencer.tokenizer.decode(shifted_tgt)).split(' ') 
-          shifted_tgt = [x for x in shifted_tgt if x != ''] + ['\n']
-          out_decoded = [x[0] for x in out_decoded]
+          shifted_tgt = [x for x in shifted_tgt if x != '']
+          out_decoded = [x[0] for x in output]
           jg_note_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
           f1, prec, recall = onset_f1(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
 
         else:
           jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
           f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-      except:
+      except Exception as e:
+        print(f"Error occured in inference evaluation result: {e}")
         jg_note_acc = 0
         f1, prec, recall = 0, 0, 0
       # try:
@@ -663,8 +671,9 @@ class JeongganTrainer(Trainer):
     onset_f1_score = sum(onset_f1_score)/len(onset_f1_score)
     onset_prec_score = sum(onset_prec_score)/len(onset_prec_score)
     onset_recall_score = sum(onset_recall_score)/len(onset_recall_score)
+    jg_matched_score = sum(jg_matched)/len(jg_matched)
     
-    return {'note_acc': note_acc, 'onset_f1': onset_f1_score, 'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score}
+    return {'note_acc': note_acc, 'onset_f1': onset_f1_score, 'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score, 'jg_matched': jg_matched_score}
 
 class BertTrainer(JeongganTrainer):
   def __init__(self, 
