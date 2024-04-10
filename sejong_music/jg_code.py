@@ -641,6 +641,7 @@ class ABCDataset(JeongganDataset):
               is_pos_counter=True,
               augment_param=None,
               num_max_inst=6,
+              use_offset=False,
               is_summarize=None):
     super().__init__(data_path=data_path, 
                      slice_measure_num=slice_measure_num, 
