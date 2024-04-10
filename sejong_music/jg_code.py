@@ -11,10 +11,11 @@ from tqdm.auto import tqdm
 import torch
 import numpy as np
 
-from .jg_to_staff_converter import JGToStaffConverter, Note
+from .jg_to_staff_converter import JGToStaffConverter, Note, ThreeColumnDetector
 from .constants import POSITION, PITCH, PART, DURATION, BEAT, BEAT_POSITION
 from .utils import  as_fraction, FractionEncoder
 from .mlm_utils import Augmentor
+from .abc_utils import TokenList, PosToken
 
 
 
@@ -33,6 +34,7 @@ class JeongganPiece:
       self.inst_list = self.txt_fn[:-4].split('/')[-1].split('_')[1:]
     self.parts, self.part_dict = self.split_to_inst()
     self.check_measure_length()
+    self.check_jeonggan_validity()
     self.tokenized_parts = [self.split_and_filter(part) for part in self.parts]
     self.token_counter = self.count_token()
     self.sliced_parts_by_inst, self.sliced_parts_by_measure = self.prepare_sliced_measures()
@@ -106,6 +108,18 @@ class JeongganPiece:
     self.first_measure_len = meausre_length_of_first_instrument[0]
     self.middle_measure_len = meausre_length_of_first_instrument[1] 
     self.final_measure_len = meausre_length_of_first_instrument[-1]
+  
+  def check_jeonggan_validity(self):
+    import re
+    # self.is_clean = False
+    jg_tokens = self.parts[1].split(' ')
+    jg_tokens = [x for x in jg_tokens if x != '']
+    jg_tokens = self.filter_by_ignore_token(jg_tokens)
+    jgs = ' '.join(jg_tokens).split('|')
+    pattern = r":\d+"
+    for jg in jgs:
+      matches = re.findall(pattern, jg)
+
     
   def prepare_sliced_measures(self, slice_len=4):
     if not self.is_clean:
@@ -152,9 +166,19 @@ class JeongganPiece:
     #     outputs[start_frame, 1] = '음표시작'
     outputs[outputs==0] = '비어있음'
     return outputs
-  
+  '''
   @staticmethod
   def convert_token_to_abs_offset(tokens:List[str]):
+    new_tokens = []
+    for token in tokens:
+      if token in POSITION[2:]: # if token is position, not | or \n
+        new_token = f"beat:{str(Fraction(Note.pos_to_beat_offset[token]))}"
+        new_tokens.append(new_token)
+      else:
+        new_tokens.append(token)
+    return new_tokens
+    
+ 
     notes:List[Note] = JGToStaffConverter.convert_to_notes(tokens)
     JGToStaffConverter._fix_three_col_division(notes)
     note_id = 0
@@ -168,8 +192,42 @@ class JeongganPiece:
       else:
         new_tokens.append(token)
     return new_tokens
-
+    '''
   
+  @staticmethod
+  def convert_token_to_abs_offset(tokens:List[str]):    
+    new_tokens = TokenList()
+    pos_in_current_jg = []
+    
+    for token in tokens:
+      if token in ('|', '\n'):
+        pos_in_current_jg = []
+        new_tokens.append(token)
+      elif token in POSITION[2:]: # if token is position, not | or \n
+        int_pos = int(token[1:])
+        if (int_pos in (2, 5, 8) and (int_pos-1) in pos_in_current_jg) \
+          or (int_pos == 10 and 12 in pos_in_current_jg) \
+          or (int_pos == 11 and 14 in pos_in_current_jg): # if note in three column middle
+            int_pos = 16+ThreeColumnDetector.pos2column[token]
+        elif int_pos in (3, 6, 9, 13, 15) and ThreeColumnDetector.pos2column[token]+16 in pos_in_current_jg:
+          int_pos =  21+ThreeColumnDetector.pos2column[token]
+        elif int_pos in (3, 6, 9, 13, 15) and int_pos - 1 in pos_in_current_jg:
+          int_pos = 21+ThreeColumnDetector.pos2column[token]
+          new_tokens.last_pos_token.adjust_pos = f':{16+ThreeColumnDetector.pos2column[new_tokens.last_pos_token.pos]}'
+        pos_in_current_jg.append(int_pos)
+        # new_token = f"beat:{str(Fraction(Note.pos_to_beat_offset[token]))}"
+        new_tokens.append(PosToken(token, int_pos))
+      else:
+        new_tokens.append(token)
+    
+    beat_tokens = []
+    for token in new_tokens:
+      if isinstance(token, PosToken):
+        beat_tokens.append(f"beat:{str(Fraction(Note.pos_to_beat_offset[token.adjust_pos]))}")
+      else:
+        beat_tokens.append(token)
+    return beat_tokens
+
   def __len__(self):
     return len(self.parts[0].split('\n'))
   

@@ -13,7 +13,8 @@ from sejong_music.model_zoo import Seq2seq, QkvAttnSeq2seqOrch, get_emb_total_si
 from sejong_music.utils import convert_note_to_sampling, convert_onset_to_sustain_token, make_offset_set
 from sejong_music.sampling_utils import nucleus
 from sejong_music.constants import get_dynamic_template_for_orch, get_dynamic, POSITION, DURATION, PITCH
-from sejong_music.jg_to_staff_converter import ABCtoGenConverter, BeatToGenConverter
+from sejong_music.jg_to_staff_converter import ABCtoGenConverter
+from sejong_music.abc_utils import convert_beat_jg_to_gen
 
 class Inferencer:
   def __init__(self, 
@@ -301,7 +302,7 @@ class JGInferencer(Inferencer):
     super().__init__(model, is_condition_shifted, is_orch, is_sep=False, temperature=temperature, top_p=top_p)
     self.use_offset = 'beat:0' in self.tokenizer.vocab
     if self.use_offset:
-      self.beat2gen = BeatToGenConverter()
+      self.beat2gen = convert_beat_jg_to_gen
     
   def get_start_token(self, inst:str):
     return torch.LongTensor(self.tokenizer(['start', 'prev|', 'jg:0', 'gak:0', inst])).unsqueeze(0)
@@ -314,8 +315,8 @@ class JGInferencer(Inferencer):
     src_decoded = self.tokenizer.decode(src[1:-1])
     out_decoded = self.tokenizer.decode(output)
     if self.use_offset:
-      converted = self.beat2gen([x[0] for x in out_decoded]) + ' \n '
-      converted = [x for x in converted.split(' ') if x != ''] 
+      converted = self.beat2gen([x[0] for x in out_decoded]) + ['\n']
+      converted = [x for x in converted if x != ''] 
       shorter_len = min(len(converted), len(out_decoded))
       out_decoded = [[converted[i]] + out_decoded[i][1:] for i in range(shorter_len)]
     return src_decoded, out_decoded, other_out

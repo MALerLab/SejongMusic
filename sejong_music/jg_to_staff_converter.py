@@ -159,7 +159,9 @@ class Note:
                         ':20': Fraction(2, 3),
                         ':21': Fraction(2, 9),
                         ':22': Fraction(5, 9),
-                        ':23': Fraction(8, 9)}
+                        ':23': Fraction(8, 9),
+                        ':24': Fraction(1, 3),
+                        ':25': Fraction(5, 6)}
   def __init__(self, pitch:List[str], pos:str, global_jg_offset:int, jg_offset:int, gak_offset:int, duration:float=None) -> None:
     assert type(pitch) == list
     self.pitch = pitch[0]
@@ -919,29 +921,39 @@ class BeatToGenConverter:
     global_jg_offset = 0
     prev_notes = []
     prev_position = 0
+    prev_jg_idx, prev_gak_idx = 0, 0
     position_tokens = BEAT_POSITION
     gak_idx = 0
     jg_idx = 0
     for token in tokens:
+      if token in ('start', 'end', 'pad', 'mask'):
+        continue
       if token in ('|', '\n'):      
         global_jg_offset += 1
-        if prev_notes:
-          total_notes.append(ABCNote(prev_notes, duration=global_jg_offset-prev_position, global_offset=prev_position, jg_offset=jg_idx, gak_offset=gak_idx))
-          prev_notes = []
         if token == '|': 
           jg_idx += 1
         if token == '\n':
+          if prev_notes:
+            total_notes.append(ABCNote(prev_notes, duration=current_offset-prev_position, global_offset=prev_position, jg_offset=prev_jg_idx, gak_offset=prev_gak_idx))
+            prev_notes = ['-']
           gak_idx += 1
           jg_idx = 0
         continue
       if token in BEAT_POSITION:
         current_offset = global_jg_offset + Fraction(token[5:])
         if prev_notes:
-          total_notes.append(ABCNote(prev_notes, duration=current_offset-prev_position, global_offset=prev_position, jg_offset=jg_idx, gak_offset=gak_idx))
+          total_notes.append(ABCNote(prev_notes, duration=current_offset-prev_position, global_offset=prev_position, jg_offset=prev_jg_idx, gak_offset=prev_gak_idx))
         prev_position = current_offset
         prev_notes = []
       else:
+        if len(prev_notes) == 1 and prev_notes[0] == '-':
+          prev_notes = []
         prev_notes.append(token)
+        prev_gak_idx = gak_idx
+        prev_jg_idx = jg_idx
+    if prev_notes:
+      print(f'last prev_notes to append: {prev_notes}')
+      total_notes.append(ABCNote(prev_notes, duration=global_jg_offset-prev_position, global_offset=prev_position, jg_offset=prev_jg_idx, gak_offset=prev_gak_idx))
     return total_notes
 
     
@@ -954,6 +966,6 @@ class BeatToGenConverter:
       conv_jgs = self.abc2gen_converter.to_omr_converter.list_of_abc_notes_to_jeonggan(note_in_measure)
       text_jgs = self.abc2gen_converter.to_omr_converter.jeonggan_note_to_text(conv_jgs)
       part_text.append('|'.join(text_jgs))
-    gen_code = self.abc2gen_converter.gencode_converter.convert_lines_to_gencode(part_text)
+    gen_code = self.abc2gen_converter.gencode_converter.convert_lines_to_gencode(part_text) + ' \n '
     gen_code_tokens = ' '.join([x for x in gen_code.split(' ') if x != ''])
     return gen_code_tokens
