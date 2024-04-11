@@ -80,6 +80,8 @@ class Trainer:
     self.pitch_similarity = []
     self.dynamic_similarity = []
     
+    self.best_valid_acc_dict = {}
+    
     self.inferencer = Inferencer( model, 
                               is_condition_shifted=model.is_condition_shifted,  
                               is_orch=False,
@@ -133,6 +135,14 @@ class Trainer:
       if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0 and iteration  > self.min_epoch_for_infer * num_iter_per_epoch:
         self.model.eval()
         valid_metrics:dict = self.make_inference_result()
+        for key in valid_metrics.keys():
+          if key in self.best_valid_acc_dict:
+            if self.best_valid_acc_dict[key] < valid_metrics[key]:
+              self.best_valid_acc_dict[key] = valid_metrics[key]
+              torch.save(self.model.state_dict(), self.save_dir / f'best_{key}_model.pt')
+              print(f"Best {key} Model Saved at {iteration}th iteration! {key}: {valid_metrics[key]}")
+          else:
+            self.best_valid_acc_dict[key] = valid_metrics[key]
         if self.save_log:
           wandb.log(valid_metrics, step=self.iteration)
         self.model.train()
@@ -582,6 +592,7 @@ class JeongganTrainer(Trainer):
     # for idx in range(self.valid_loader.batch_size):
     selected_idx_list = [i for i in range(len(loader.dataset))]
     note_acc = []
+    note_none_strict = []
     onset_f1_score = []
     onset_prec_score = []
     onset_recall_score = []
@@ -617,6 +628,7 @@ class JeongganTrainer(Trainer):
           gen_tokens = gen_str.split(' ')
           output_decoded = [x[0] for x in output]
           jg_note_acc = per_jg_note_acc(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          non_strict_acc = per_jg_note_acc(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
           f1, prec, recall = onset_f1(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
 
         elif self.inferencer.use_offset:
@@ -624,13 +636,15 @@ class JeongganTrainer(Trainer):
           shifted_tgt = [x for x in shifted_tgt if x != '']
           out_decoded = [x[0] for x in output]
           jg_note_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          non_strict_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
           f1, prec, recall = onset_f1(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
         else:
           jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          non_strict_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
           f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
       except Exception as e:
         print(f"Error occured in inference evaluation result: {e}")
-        jg_note_acc = 0
+        jg_note_acc, non_strict_acc = 0, 0
         f1, prec, recall = 0, 0, 0
       # try:
       #   note_dict, stream = self.decoder.convert_inference_result(output, src, self.model.tokenizer.decode(shifted_tgt))
@@ -646,6 +660,7 @@ class JeongganTrainer(Trainer):
       #   # print([note[2] for note in output])
       #   is_match = False
       note_acc.append(jg_note_acc)
+      note_none_strict.append(non_strict_acc)
       onset_f1_score.append(f1)
       onset_prec_score.append(prec)
       onset_recall_score.append(recall)
@@ -683,18 +698,14 @@ class JeongganTrainer(Trainer):
       '''
 
     jg_matched_score = sum(jg_matched)/len(selected_idx_list)
-    if len(note_acc) == 0:
-      note_acc = 0
-      onset_f1_score = 0
-      onset_prec_score = 0
-      onset_recall_score = 0
-    else:
-      note_acc = sum(note_acc)/len(note_acc)
-      onset_f1_score = sum(onset_f1_score)/len(onset_f1_score)
-      onset_prec_score = sum(onset_prec_score)/len(onset_prec_score)
-      onset_recall_score = sum(onset_recall_score)/len(onset_recall_score)
+
+    note_acc = sum(note_acc)/len(selected_idx_list)
+    note_none_strict = sum(note_none_strict)/len(selected_idx_list)
+    onset_f1_score = sum(onset_f1_score)/len(selected_idx_list)
+    onset_prec_score = sum(onset_prec_score)/len(selected_idx_list)
+    onset_recall_score = sum(onset_recall_score)/len(selected_idx_list)
       
-    return {'note_acc': note_acc, 'onset_f1': onset_f1_score, 'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score, 'jg_matched': jg_matched_score }
+    return {'note_acc': note_acc, 'onset_f1': onset_f1_score, 'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score, 'jg_matched': jg_matched_score, 'note_none_strict': note_none_strict}
 
 class BertTrainer(JeongganTrainer):
   def __init__(self, 

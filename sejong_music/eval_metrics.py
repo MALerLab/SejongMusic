@@ -6,7 +6,7 @@ from sejong_music.constants import PITCH
 
 
 def per_jg_note_acc(pred, gt, inst, tokenizer, 
-                    num_frame_per_jg=6, strict=True, pitch_only=True):
+                    num_frame_per_jg=6, strict=True, pitch_only=False):
   '''
   Calculates per-jeonggan note accuracy.
 
@@ -59,7 +59,7 @@ def per_jg_note_acc(pred, gt, inst, tokenizer,
 
 
 def onset_f1(pred, gt, inst, tokenizer, 
-             num_frame_per_jg=6, pitch_only=True):
+             num_frame_per_jg=6, pitch_only=False):
   '''
   Calculates per-jeonggan onset f1.
   Ornamentations in note positions are also considered as onsets.
