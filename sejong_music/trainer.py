@@ -610,13 +610,21 @@ class JeongganTrainer(Trainer):
         print(f"Generated JG mismatch: num_tg_jg: {num_tg_jg}, num_gen_jg: {num_gen_jg}")
         continue
       try:
-        if self.inferencer.use_offset:
+        if isinstance(self.inferencer, ABCInferencer):
+          tgt_decoded = self.inferencer.tokenizer.decode(shifted_tgt)
+          # tgt_decoded = [[token[0], token[-1]] for token in tgt_decoded]
+          gen_str = self.inferencer.jg_decoder(tgt_decoded)
+          gen_tokens = gen_str.split(' ')
+          output_decoded = [x[0] for x in output]
+          jg_note_acc = per_jg_note_acc(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          f1, prec, recall = onset_f1(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+
+        elif self.inferencer.use_offset:
           shifted_tgt = self.inferencer.beat2gen(self.inferencer.tokenizer.decode(shifted_tgt))
           shifted_tgt = [x for x in shifted_tgt if x != '']
           out_decoded = [x[0] for x in output]
           jg_note_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
           f1, prec, recall = onset_f1(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-
         else:
           jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
           f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
