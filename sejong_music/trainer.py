@@ -673,10 +673,8 @@ class JeongganTrainer(Trainer):
           wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
                     step=self.iteration)
       '''
-    if len(jg_matched) == 0:
-      jg_matched_score = 0
-    else:
-      jg_matched_score = sum(jg_matched)/len(jg_matched)
+
+    jg_matched_score = sum(jg_matched)/len(selected_idx_list)
     if len(note_acc) == 0:
       note_acc = 0
       onset_f1_score = 0
@@ -688,7 +686,7 @@ class JeongganTrainer(Trainer):
       onset_prec_score = sum(onset_prec_score)/len(onset_prec_score)
       onset_recall_score = sum(onset_recall_score)/len(onset_recall_score)
       
-    return {'note_acc': note_acc, 'onset_f1': onset_f1_score, 'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score, 'jg_matched': jg_matched_score}
+    return {'note_acc': note_acc, 'onset_f1': onset_f1_score, 'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score, 'jg_matched': jg_matched_score }
 
 class BertTrainer(JeongganTrainer):
   def __init__(self, 

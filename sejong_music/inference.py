@@ -451,6 +451,7 @@ class ABCInferencer(JGInferencer):
 
       if current_beat >= measure_duration:
           decoded_token = '\n'
+          selected_token = torch.LongTensor([[self.tokenizer.tok2idx['\n']]]).to(dev)
           
       if decoded_token == '\n':
         current_gak_idx += 1
@@ -460,16 +461,16 @@ class ABCInferencer(JGInferencer):
           
       if decoded_token in self.tokenizer.dur_vocab:
         current_beat += decoded_token
-        if first_gak:
-          if current_beat >= first_measure_duration:
-            current_jg_idx += 1
-            current_beat = 0.0
-        elif current_beat >= second_measure_duration:
-          current_gak_idx += 1
-          current_jg_idx = 0
-          current_beat = 0.0
-
-      if f'jg:{current_jg_idx}' not in self.tokenizer.vocab or f'gak:{current_gak_idx}' not in self.tokenizer.vocab:
+        # if first_gak:
+        #   if current_beat >= first_measure_duration:
+        #     current_jg_idx += 1
+        #     current_beat = 0.0
+        # elif current_beat >= second_measure_duration:
+        #   current_gak_idx += 1
+        #   current_jg_idx = 0
+        #   current_beat = 0.0
+      # print(decoded_token, current_beat, current_gak_idx)
+      if f'jg:{str(int(current_beat//1))}' not in self.tokenizer.vocab or f'gak:{current_gak_idx}' not in self.tokenizer.vocab:
         break
         
       condition_tokens = self.encode_condition_token(current_beat, current_gak_idx, inst_name)

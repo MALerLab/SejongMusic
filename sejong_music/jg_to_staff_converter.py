@@ -909,7 +909,7 @@ class ABCtoGenConverter:
       conv_jgs = self.to_omr_converter.list_of_abc_notes_to_jeonggan(note_in_measure)
       text_jgs = self.to_omr_converter.jeonggan_note_to_text(conv_jgs)
       part_text.append('|'.join(text_jgs))
-    return self.gencode_converter.convert_lines_to_gencode(part_text)
+    return self.gencode_converter.convert_lines_to_gencode(part_text) + '\n'
   
   
 class BeatToGenConverter:
