@@ -298,7 +298,8 @@ class JGInferencer(Inferencer):
                is_condition_shifted: bool, 
                is_orch: bool, 
                temperature: float = 1, 
-               top_p: float = 1):
+               top_p: float = 1,
+               is_abc: bool = False):
     super().__init__(model, is_condition_shifted, is_orch, is_sep=False, temperature=temperature, top_p=top_p)
     self.use_offset = 'beat:0' in self.tokenizer.vocab
     if self.use_offset:

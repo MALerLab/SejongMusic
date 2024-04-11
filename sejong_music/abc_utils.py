@@ -167,6 +167,8 @@ def convert_beat_jg_to_gen(tokens:List[str]) -> List[str]:
           clean_tokens.last_beat_token.gen = ':11'
         elif clean_tokens.penultimate_beat_token.gen in (':2', ':3', ':4'):
           clean_tokens.last_beat_token.gen = ':6'
+        else:
+          clean_tokens.last_beat_token.gen = ':11'
       elif clean_tokens.last_beat_token.beat == 'beat:3/4':
         clean_tokens.last_beat_token.gen = ':15'
     else:

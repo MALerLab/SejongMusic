@@ -64,7 +64,7 @@ class JGCodeToOMRDecoder:
     
     pos_token_in_jg = re.findall(r'(?::\d+)', jg_token_str)
     splitted_tokens = jg_token_str.split(' ')
-    splitted_tokens = [x for x in splitted_tokens if x]
+    splitted_tokens = [x for x in splitted_tokens if ':' in x]
     is_three_col = any(pos in pos_token_in_jg for pos in cls.third_pos)
     is_two_col = any(pos in pos_token_in_jg for pos in cls.half_pos)
     
@@ -84,7 +84,7 @@ class JGCodeToOMRDecoder:
     if ':9' in pos_token_in_jg and ':7' not in pos_token_in_jg: splitted_tokens.append('-:7')
     if ':10' in pos_token_in_jg and ':12' not in pos_token_in_jg: splitted_tokens.append('-:12')
     if ':12' in pos_token_in_jg and ':10' not in pos_token_in_jg: splitted_tokens.append('-:10')
-    
+
     jg_token_str = ' '.join(cls.sort_tokens_by_pos(splitted_tokens))
     return jg_token_str
   
@@ -909,7 +909,7 @@ class ABCtoGenConverter:
       conv_jgs = self.to_omr_converter.list_of_abc_notes_to_jeonggan(note_in_measure)
       text_jgs = self.to_omr_converter.jeonggan_note_to_text(conv_jgs)
       part_text.append('|'.join(text_jgs))
-    return self.gencode_converter.convert_lines_to_gencode(part_text) + '\n'
+    return self.gencode_converter.convert_lines_to_gencode(part_text) + ' \n'
   
   
 class BeatToGenConverter:

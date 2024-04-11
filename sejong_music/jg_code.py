@@ -34,7 +34,7 @@ class JeongganPiece:
       self.inst_list = self.txt_fn[:-4].split('/')[-1].split('_')[1:]
     self.parts, self.part_dict = self.split_to_inst()
     self.check_measure_length()
-    self.check_jeonggan_validity()
+    # self.check_jeonggan_validity()
     self.tokenized_parts = [self.split_and_filter(part) for part in self.parts]
     self.token_counter = self.count_token()
     self.sliced_parts_by_inst, self.sliced_parts_by_measure = self.prepare_sliced_measures()
@@ -269,20 +269,25 @@ class ABCPiece(JeongganPiece):
   
   def make_features(self, notes):
     total_tokens = []
-    prev_gak = notes[0].gak_offset
+    note = notes[0]
+    prev_gak = note.gak_offset
+    prev_note_end = note.beat_offset + note.duration + note.jg_offset
     for note in notes:
       if note.pitch == None or note.duration == None: #뭔지 확인하기
         continue
       if note.gak_offset != prev_gak:
         num = note.gak_offset - prev_gak
         for i in range(num):
-          total_tokens.append(['\n', f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset-num+i}"])
+          jg_offset = int(prev_note_end) if i==0 else 0
+          total_tokens.append(['\n', f"beat:0", f"jg:{jg_offset}", f"gak:{note.gak_offset-num+i}"])
+          # total_tokens.append(['\n', f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset-num+i}"])
         prev_gak = note.gak_offset
       total_tokens.append([note.pitch, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])    
       if note.ornaments:
         for orn in note.ornaments:
           total_tokens.append([orn, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
       total_tokens.append([note.duration, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
+      prev_note_end = note.beat_offset + note.duration + note.jg_offset
     total_tokens.append(['\n', f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
     return total_tokens
   
@@ -592,7 +597,7 @@ class ABCTokenizer:
 
         self.vocab = ['pad', 'start', 'end'] + DURATION + PITCH + special_token + PART # + special_token]
         self.vocab += [f'beat:{x}' for x in BEAT] # add beat position token
-        self.vocab += [f'jg:{i}' for i in range(20)]  # add jg position 
+        self.vocab += [f'jg:{i}' for i in range(21)]  # add jg position 
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  

@@ -49,6 +49,7 @@ class Generator:
   def _load_model(self):
     # model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter72000_model.pt'
     model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter34800_model.pt'
+    # model_state_path = Path(self.config.inst_state_dir) / 'inst_0/last_model.pt'
     tokenizer_vocab_path = Path(self.config.inst_state_dir) / 'tokenizer_vocab.json'
     model_config_path = Path(self.config.inst_state_dir) / 'config.yaml'
     tokenizer:JeongganTokenizer = getattr(jg_code, self.config.class_names.tokenizer)(None, None, json_fn=tokenizer_vocab_path)
@@ -99,7 +100,6 @@ class Generator:
       sample, _, _ = dataset.get_processed_feature(condition_instruments, condition_instruments[0], i, force_target_inst=target_inst)  
       sample = torch.LongTensor(sample)        
       _, output_decoded, (attention_map, output, new_out) = self.inferencer.inference(sample, target_inst, prev_generation=prev_generation)
-      print(output_decoded)
       if i == 0:
         sel_out = torch.cat([output[0:1]] + [self.get_measure_specific_output(output, self.tokenizer.tok2idx[f'gak:{i}']) for i in range(0,3)], dim=0)
       else:
@@ -201,12 +201,14 @@ if __name__ == '__main__':
   config = OmegaConf.load('yamls/gen_settings/jg_cph.yaml')
   out_dir = Path('gen_results/')
   out_dir.mkdir(parents=True, exist_ok=True)
-  name = 'cph_bert_daegeum_first'
-  inst_cycles = ['piri', 'daegeum',  'haegeum', 'geomungo', 'gayageum', 'ajaeng']
+  name = 'cph_bert_v20beat'
+  
+  # inst_cycles = ['piri', 'daegeum',  'haegeum', 'geomungo', 'gayageum', 'ajaeng']
+  inst_cycles = ['piri', 'geomungo', 'gayageum', 'ajaeng', 'haegeum', 'daegeum']
 
   gen = Generator(config)
   gen.model.to('cuda')
-  txt_fn = 'music_score/chwipunghyeong_bert_gen.txt'
+  txt_fn = 'music_score/chwipunghyeong_bert_20beat_gen.txt'
   output_str = gen.inference_from_gen_code(txt_fn, inst_cycles)
   with open(out_dir / f'{name}_gen.txt', 'w') as f:
     f.write(output_str)
@@ -215,9 +217,9 @@ if __name__ == '__main__':
   with open(out_dir / f'{name}_omr.txt', 'w') as f:
     f.write(jg_omr_str)
 
-  notes, score = gen.jg_to_staff_converter.convert_multi_track(output_str, time_signature='30/8')
+  notes, score = gen.jg_to_staff_converter.convert_multi_track(output_str, time_signature='60/8')
 
-  txt_fn = 'gen_results/chwipunghyeong_bert_orchestration_gencode5.txt'
+  txt_fn = out_dir / f'{name}_gen.txt'
   output_str = gen.cycle_inference_from_gen_code(txt_fn, inst_cycles=inst_cycles, num_cycles=6)
   with open(out_dir / f'{name}_cycle_gen.txt', 'w') as f:
     f.write(output_str)
@@ -226,7 +228,7 @@ if __name__ == '__main__':
   with open(out_dir / f'{name}_cycle_omr.txt', 'w') as f:
     f.write(jg_omr_str_cycle)
   
-  cycle_notes, cycle_score = gen.jg_to_staff_converter.convert_multi_track(output_str, time_signature='30/8')
+  cycle_notes, cycle_score = gen.jg_to_staff_converter.convert_multi_track(output_str, time_signature='60/8')
   cycle_score.write('musicxml', out_dir / f'{name}_cycle.musicxml')
   score.write('musicxml', out_dir / f'{name}.musicxml' )
   

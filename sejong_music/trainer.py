@@ -126,8 +126,8 @@ class Trainer:
           self.best_valid_loss = validation_loss
           torch.save(self.model.state_dict(), self.save_dir / 'best_loss_model.pt')
         
-      # if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0:
-      #   torch.save(self.model.state_dict(), self.save_dir / f'iter{iteration+1}_model.pt')
+      if (iteration + 1) % (100 * num_iter_per_epoch) == 0:
+        torch.save(self.model.state_dict(), self.save_dir / f'iter{iteration+1}_model.pt')
       torch.save(self.model.state_dict(), self.save_dir / 'last_model.pt')
       
       if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0 and iteration  > self.min_epoch_for_infer * num_iter_per_epoch:
