@@ -600,7 +600,7 @@ class JeongganTrainer(Trainer):
         # print([note[2] for note in output])
       if isinstance(self.inferencer, ABCInferencer):
         num_gen_jg = sum([1 for note in output if note[0] in ('|', '\n')])
-        gen_converted_tgt = self.inferencer.jg_decoder(self.inferencer.tokenizer.decode(shifted_tgt)).split(' ') + ['\n']
+        gen_converted_tgt = self.inferencer.jg_decoder(self.inferencer.tokenizer.decode(shifted_tgt)).split(' ')
         num_tg_jg = sum([1 for note in gen_converted_tgt if note in ('|', '\n')])
       else:
         num_tg_jg = sum([1 for note in self.inferencer.tokenizer.decode(shifted_tgt) if note in ('|', '\n')])
