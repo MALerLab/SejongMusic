@@ -597,7 +597,7 @@ class ABCTokenizer:
 
         self.vocab = ['pad', 'start', 'end'] + DURATION + PITCH + special_token + PART # + special_token]
         self.vocab += [f'beat:{x}' for x in BEAT] # add beat position token
-        self.vocab += [f'jg:{i}' for i in range(21)]  # add jg position 
+        self.vocab += [f'jg:{i}' for i in range(27)]  # add jg position 
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
