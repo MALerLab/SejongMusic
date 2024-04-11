@@ -278,7 +278,7 @@ class ABCPiece(JeongganPiece):
       if note.gak_offset != prev_gak:
         num = note.gak_offset - prev_gak
         for i in range(num):
-          jg_offset = int(prev_note_end) if i==0 else 0
+          jg_offset = int(prev_note_end) if num==1 else 0
           total_tokens.append(['\n', f"beat:0", f"jg:{jg_offset}", f"gak:{note.gak_offset-num+i}"])
           # total_tokens.append(['\n', f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset-num+i}"])
         prev_gak = note.gak_offset
