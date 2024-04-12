@@ -426,6 +426,9 @@ class JeongganDataset:
     self.is_summarize = is_summarize
     self.use_offset = use_offset
     self.num_max_inst = num_max_inst
+    
+    self.use_pitch_modification = use_pitch_modification
+    self.pitch_modification_ratio = pitch_modification_ratio
     if self.use_offset: 
       self.position_tokens = BEAT_POSITION
     if self.is_pos_counter:
@@ -545,6 +548,15 @@ class JeongganDataset:
       if note[0] not in position_tokens:
         filtered.append(note)
     return filtered
+  
+  def modify_pitch(self, note_list:List[List[str]]):
+    modified = []
+    for note in note_list:
+      if note[0] in PITCH and random.random() < self.pitch_modification_ratio:
+        modified.append([random.choice(PITCH)] + note[1:])
+      else:
+        modified.append(note)
+    return modified
 
   def get_processed_feature(self, condition_insts: List[str], target_inst: str, idx: int, force_target_inst:str=None):
       assert isinstance(condition_insts, list), "front_part_insts should be a list"
@@ -566,9 +578,13 @@ class JeongganDataset:
       if self.is_pos_counter:
         target = self.shift_condition(target)
         
+        
       shifted_target = target[1:]
       target = target[:-1]
       shifted_target = [x[0] for x in shifted_target]
+      if self.use_pitch_modification and not self.is_valid:
+        target = self.modify_pitch(target)
+
       return self.tokenizer(source), self.tokenizer(target), self.tokenizer(shifted_target)
 
 
