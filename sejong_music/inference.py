@@ -355,7 +355,7 @@ class JGInferencer(Inferencer):
     # while True:
     condition_tokens = self.encode_condition_token(prev_pos_token, current_jg_idx, current_gak_idx, inst_name)
 
-    for i in tqdm(range(2000), leave=False):
+    for i in range(2000):
       input_token = torch.cat(final_tokens, dim=0) if isinstance(self.model, JeongganTransSeq2seq) else selected_token
       logit, encoder_output, attention_weight = self.model._run_inference_on_step(input_token, encoder_output)
       selected_token = self.sampling_process(logit)
