@@ -746,6 +746,9 @@ class ABCDataset(JeongganDataset):
       # target = self.get_inst_and_position_feature(original_target, target_inst)
       if self.is_pos_counter:
         target = self.shift_condition(expanded_target)
+      else:
+        expanded_target = [[x[0], x[-1]] for x in   expanded_target]
+        target = [target_start_token] + expanded_target + [target_end_token]
 
       shifted_target = target[1:]
       target = target[:-1]
