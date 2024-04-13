@@ -577,6 +577,8 @@ class JeongganDataset:
       target = self.get_inst_and_position_feature(original_target, target_inst)
       if self.is_pos_counter:
         target = self.shift_condition(target)
+      else:
+        target = [target_start_token] + target + [target_end_token]
         
         
       shifted_target = target[1:]
