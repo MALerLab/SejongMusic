@@ -30,7 +30,7 @@ class EraTransformer:
   omr2gen = GencodeConverter
   gen2staff = JGToStaffConverter()
 
-  def __init__(self, state_dir:str, device='cuda'):
+  def __init__(self, state_dir:str, device='cuda', is_chp=False):
     self.state_dir = Path(state_dir)
     self.model, self.tokenizer, self.config = self.load_model_tokenizer_from_state_dir(state_dir)
     self.model.to(device)
@@ -39,7 +39,10 @@ class EraTransformer:
     self.mask_id = self.tokenizer.tok2idx['mask']
     self.sus_id = self.tokenizer.tok2idx['-']
     self.non_orn_id = self.tokenizer.tok2idx['비어있음']
-    self.masker = EraTransformMasker(self.mask_id, self.sus_id)
+    if is_chp:
+      self.masker = CHPMasker(self.mask_id, self.sus_id)
+    else:
+      self.masker = EraTransformMasker(self.mask_id, self.sus_id)
     
     
   @staticmethod
@@ -359,10 +362,45 @@ class EraTransformMasker:
         new_notes.append(note)
     return new_notes
   
+
+class CHPMasker(EraTransformMasker):
+  num_beat = 6
+  eight_to_ten = [0] * 6 * 8
+  for i in range(18):
+    eight_to_ten[i] = i
+  for i in range(18, 36):
+    eight_to_ten[i] = i + 12
+  for i in range(36, 48):
+    eight_to_ten[i] = i + 6
+  eight_to_ten = torch.LongTensor(eight_to_ten)
+
+  eight_to_twenty = [0] * 6 * 8
+  for i in range(18):
+    eight_to_twenty[i] = i * 2
+  for i in range(18, 36):
+    eight_to_twenty[i] = 60 + (i - 18) * 2
+  for i in range(36, 48):
+    eight_to_twenty[i] = 108 + (i - 36)
+  eight_to_twenty = torch.LongTensor(eight_to_twenty)
+  
+  def __init__(self, mask_id: int, sus_id: int):
+    super().__init__(mask_id, sus_id)
+
   
 if __name__ == "__main__":
   num_jg = 20
   
+  era_transformer = EraTransformer('models/bert_checkpoints', device='cuda:0', is_chp=True)
+  gen_str = open('music_score/chihwapyeong_down_gen.txt').read()
+  total_gen_str = era_transformer.full_generation(gen_str, num_jg_per_gak=num_jg)
+  with open(f'music_score/chihwapyeong_down_bert_{num_jg}beat_gen.txt', 'w') as f:
+    f.write(total_gen_str)
+  notes, score = era_transformer.gen2staff(total_gen_str, time_signature=f'{int(num_jg)*3}/8')
+  score.write('musicxml', f'chp_bert_{num_jg}beat2.musicxml')
+
+  
+  '''
+  num_jg = 20
   era_transformer = EraTransformer('models/bert_checkpoints', device='cuda:0')
   gen_str = open('music_score/chwipunghyeong_gen.txt').read()
   total_gen_str = era_transformer.full_generation(gen_str, num_jg_per_gak=num_jg)
@@ -370,3 +408,4 @@ if __name__ == "__main__":
     f.write(total_gen_str)
   notes, score = era_transformer.gen2staff(total_gen_str, time_signature=f'{int(num_jg)*3}/8')
   score.write('musicxml', f'cph_bert_{num_jg}beat.musicxml')
+  '''

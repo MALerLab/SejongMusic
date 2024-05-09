@@ -27,6 +27,7 @@ class JGConverter:
         notes_in_measure = list(part.measures(i, i).flat.notesAndRests)
         tie_cleaned_notes = apply_tie(notes_in_measure, 7)
         for note in tie_cleaned_notes:
+          # note.pitch -= 6 # for Chihwapyeong
           for mnote in note.note:
             mnote.duration.quarterLength *= duration_multiplier
           note.offset *= duration_multiplier

@@ -98,8 +98,14 @@ class Generator:
     for i in tqdm(range(len(dataset))):
     # for i in tqdm(range(10)):
       sample, _, _ = dataset.get_processed_feature(condition_instruments, condition_instruments[0], i, force_target_inst=target_inst)  
-      sample = torch.LongTensor(sample)        
-      _, output_decoded, (attention_map, output, new_out) = self.inferencer.inference(sample, target_inst, prev_generation=prev_generation)
+      sample = torch.LongTensor(sample)
+      while True:
+        try:        
+          _, output_decoded, (attention_map, output, new_out) = self.inferencer.inference(sample, target_inst, prev_generation=prev_generation)
+          break
+        except Exception as e:
+          print('에러가 났습니다. 다시 시도합니다.')
+        
       if i == 0:
         sel_out = torch.cat([output[0:1]] + [self.get_measure_specific_output(output, self.tokenizer.tok2idx[f'gak:{i}']) for i in range(0,3)], dim=0)
       else:
@@ -201,14 +207,18 @@ if __name__ == '__main__':
   config = OmegaConf.load('yamls/gen_settings/jg_cph.yaml')
   out_dir = Path('gen_results/')
   out_dir.mkdir(parents=True, exist_ok=True)
-  name = 'cph_bert_v20beat'
+  name = 'chihwapyeong_bert_orchestra_20beat_down_org'
   
   # inst_cycles = ['piri', 'daegeum',  'haegeum', 'geomungo', 'gayageum', 'ajaeng']
   inst_cycles = ['piri', 'geomungo', 'gayageum', 'ajaeng', 'haegeum', 'daegeum']
 
   gen = Generator(config)
   gen.model.to('cuda')
-  txt_fn = 'music_score/chwipunghyeong_bert_20beat_gen.txt'
+  # txt_fn = 'music_score/chwipunghyeong_bert_20beat_gen.txt'
+  # txt_fn = 'music_score/chwipunghyeong_bert_gen.txt'
+  # txt_fn = 'music_score/chihwapyeong_bert_20beat_gen.txt'
+  txt_fn = 'music_score/chihwapyeong_down_bert_20beat_gen.txt'
+  
   output_str = gen.inference_from_gen_code(txt_fn, inst_cycles)
   with open(out_dir / f'{name}_gen.txt', 'w') as f:
     f.write(output_str)
