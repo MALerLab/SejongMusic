@@ -11,10 +11,11 @@ from tqdm.auto import tqdm
 import torch
 import numpy as np
 
-from .jg_to_staff_converter import JGToStaffConverter, Note
+from .jg_to_staff_converter import JGToStaffConverter, Note, ThreeColumnDetector
 from .constants import POSITION, PITCH, PART, DURATION, BEAT, BEAT_POSITION
 from .utils import  as_fraction, FractionEncoder
 from .mlm_utils import Augmentor
+from .abc_utils import TokenList, PosToken
 
 
 
@@ -33,6 +34,7 @@ class JeongganPiece:
       self.inst_list = self.txt_fn[:-4].split('/')[-1].split('_')[1:]
     self.parts, self.part_dict = self.split_to_inst()
     self.check_measure_length()
+    # self.check_jeonggan_validity()
     self.tokenized_parts = [self.split_and_filter(part) for part in self.parts]
     self.token_counter = self.count_token()
     self.sliced_parts_by_inst, self.sliced_parts_by_measure = self.prepare_sliced_measures()
@@ -106,6 +108,18 @@ class JeongganPiece:
     self.first_measure_len = meausre_length_of_first_instrument[0]
     self.middle_measure_len = meausre_length_of_first_instrument[1] 
     self.final_measure_len = meausre_length_of_first_instrument[-1]
+  
+  def check_jeonggan_validity(self):
+    import re
+    # self.is_clean = False
+    jg_tokens = self.parts[1].split(' ')
+    jg_tokens = [x for x in jg_tokens if x != '']
+    jg_tokens = self.filter_by_ignore_token(jg_tokens)
+    jgs = ' '.join(jg_tokens).split('|')
+    pattern = r":\d+"
+    for jg in jgs:
+      matches = re.findall(pattern, jg)
+
     
   def prepare_sliced_measures(self, slice_len=4):
     if not self.is_clean:
@@ -152,9 +166,19 @@ class JeongganPiece:
     #     outputs[start_frame, 1] = '음표시작'
     outputs[outputs==0] = '비어있음'
     return outputs
-  
+  '''
   @staticmethod
   def convert_token_to_abs_offset(tokens:List[str]):
+    new_tokens = []
+    for token in tokens:
+      if token in POSITION[2:]: # if token is position, not | or \n
+        new_token = f"beat:{str(Fraction(Note.pos_to_beat_offset[token]))}"
+        new_tokens.append(new_token)
+      else:
+        new_tokens.append(token)
+    return new_tokens
+    
+ 
     notes:List[Note] = JGToStaffConverter.convert_to_notes(tokens)
     JGToStaffConverter._fix_three_col_division(notes)
     note_id = 0
@@ -168,8 +192,42 @@ class JeongganPiece:
       else:
         new_tokens.append(token)
     return new_tokens
-
+    '''
   
+  @staticmethod
+  def convert_token_to_abs_offset(tokens:List[str]):    
+    new_tokens = TokenList()
+    pos_in_current_jg = []
+    
+    for token in tokens:
+      if token in ('|', '\n'):
+        pos_in_current_jg = []
+        new_tokens.append(token)
+      elif token in POSITION[2:]: # if token is position, not | or \n
+        int_pos = int(token[1:])
+        if (int_pos in (2, 5, 8) and (int_pos-1) in pos_in_current_jg) \
+          or (int_pos == 10 and 12 in pos_in_current_jg) \
+          or (int_pos == 11 and 14 in pos_in_current_jg): # if note in three column middle
+            int_pos = 16+ThreeColumnDetector.pos2column[token]
+        elif int_pos in (3, 6, 9, 13, 15) and ThreeColumnDetector.pos2column[token]+16 in pos_in_current_jg:
+          int_pos =  21+ThreeColumnDetector.pos2column[token]
+        elif int_pos in (3, 6, 9, 13, 15) and int_pos - 1 in pos_in_current_jg:
+          int_pos = 21+ThreeColumnDetector.pos2column[token]
+          new_tokens.last_pos_token.adjust_pos = f':{16+ThreeColumnDetector.pos2column[new_tokens.last_pos_token.pos]}'
+        pos_in_current_jg.append(int_pos)
+        # new_token = f"beat:{str(Fraction(Note.pos_to_beat_offset[token]))}"
+        new_tokens.append(PosToken(token, int_pos))
+      else:
+        new_tokens.append(token)
+    
+    beat_tokens = []
+    for token in new_tokens:
+      if isinstance(token, PosToken):
+        beat_tokens.append(f"beat:{str(Fraction(Note.pos_to_beat_offset[token.adjust_pos]))}")
+      else:
+        beat_tokens.append(token)
+    return beat_tokens
+
   def __len__(self):
     return len(self.parts[0].split('\n'))
   
@@ -211,20 +269,25 @@ class ABCPiece(JeongganPiece):
   
   def make_features(self, notes):
     total_tokens = []
-    prev_gak = notes[0].gak_offset
+    note = notes[0]
+    prev_gak = note.gak_offset
+    prev_note_end = note.beat_offset + note.duration + note.jg_offset
     for note in notes:
       if note.pitch == None or note.duration == None: #뭔지 확인하기
         continue
       if note.gak_offset != prev_gak:
         num = note.gak_offset - prev_gak
         for i in range(num):
-          total_tokens.append(['\n', f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset-num+i}"])
+          jg_offset = int(prev_note_end) if num==1 else 0
+          total_tokens.append(['\n', f"beat:0", f"jg:{jg_offset}", f"gak:{note.gak_offset-num+i}"])
+          # total_tokens.append(['\n', f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset-num+i}"])
         prev_gak = note.gak_offset
       total_tokens.append([note.pitch, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])    
       if note.ornaments:
         for orn in note.ornaments:
           total_tokens.append([orn, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
       total_tokens.append([note.duration, f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
+      prev_note_end = note.beat_offset + note.duration + note.jg_offset
     total_tokens.append(['\n', f"beat:{note.beat_offset}", f"jg:{note.jg_offset}", f"gak:{note.gak_offset}"])
     return total_tokens
   
@@ -343,7 +406,7 @@ class JeongganDataset:
               pitch_modification_ratio=0.3,
               # min_meas=3,
               # max_meas=6,
-              jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '평조회상 가락덜이', '관악영산회상 염불도드리'],
+              jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'],
               feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
               # target_instrument='daegeum',
               num_max_inst:int=5,
@@ -363,6 +426,9 @@ class JeongganDataset:
     self.is_summarize = is_summarize
     self.use_offset = use_offset
     self.num_max_inst = num_max_inst
+    
+    self.use_pitch_modification = use_pitch_modification
+    self.pitch_modification_ratio = pitch_modification_ratio
     if self.use_offset: 
       self.position_tokens = BEAT_POSITION
     if self.is_pos_counter:
@@ -482,6 +548,15 @@ class JeongganDataset:
       if note[0] not in position_tokens:
         filtered.append(note)
     return filtered
+  
+  def modify_pitch(self, note_list:List[List[str]]):
+    modified = []
+    for note in note_list:
+      if note[0] in PITCH and random.random() < self.pitch_modification_ratio:
+        modified.append([random.choice(PITCH)] + note[1:])
+      else:
+        modified.append(note)
+    return modified
 
   def get_processed_feature(self, condition_insts: List[str], target_inst: str, idx: int, force_target_inst:str=None):
       assert isinstance(condition_insts, list), "front_part_insts should be a list"
@@ -502,10 +577,16 @@ class JeongganDataset:
       target = self.get_inst_and_position_feature(original_target, target_inst)
       if self.is_pos_counter:
         target = self.shift_condition(target)
+      else:
+        target = [target_start_token] + target + [target_end_token]
+        
         
       shifted_target = target[1:]
       target = target[:-1]
       shifted_target = [x[0] for x in shifted_target]
+      if self.use_pitch_modification and not self.is_valid:
+        target = self.modify_pitch(target)
+
       return self.tokenizer(source), self.tokenizer(target), self.tokenizer(shifted_target)
 
 
@@ -534,7 +615,7 @@ class ABCTokenizer:
 
         self.vocab = ['pad', 'start', 'end'] + DURATION + PITCH + special_token + PART # + special_token]
         self.vocab += [f'beat:{x}' for x in BEAT] # add beat position token
-        self.vocab += [f'jg:{i}' for i in range(20)]  # add jg position 
+        self.vocab += [f'jg:{i}' for i in range(27)]  # add jg position 
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
@@ -585,7 +666,7 @@ class ABCDataset(JeongganDataset):
               pitch_modification_ratio=0.3,
               # min_meas=3,
               # max_meas=6,
-              jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '평조회상 가락덜이', '관악영산회상 염불도드리'],
+              jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'],
               feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
               # target_instrument='daegeum',
               position_tokens=POSITION,
@@ -594,6 +675,7 @@ class ABCDataset(JeongganDataset):
               is_pos_counter=True,
               augment_param=None,
               num_max_inst=6,
+              use_offset=False,
               is_summarize=None):
     super().__init__(data_path=data_path, 
                      slice_measure_num=slice_measure_num, 
@@ -664,6 +746,9 @@ class ABCDataset(JeongganDataset):
       # target = self.get_inst_and_position_feature(original_target, target_inst)
       if self.is_pos_counter:
         target = self.shift_condition(expanded_target)
+      else:
+        expanded_target = [[x[0], x[-1]] for x in   expanded_target]
+        target = [target_start_token] + expanded_target + [target_end_token]
 
       shifted_target = target[1:]
       target = target[:-1]
@@ -704,7 +789,7 @@ class JGMaskedDataset(JeongganDataset):
   def __init__(self, data_path='music_score/gen_code', 
                slice_measure_num=4, 
                is_valid=False, 
-               jeonggan_valid_set=['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '평조회상 가락덜이', '관악영산회상 염불도드리'], 
+               jeonggan_valid_set=['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'], 
                feature_types=['token', 'ornaments', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'], 
                position_tokens=POSITION, 
                augment_param:dict={},

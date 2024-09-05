@@ -1,7 +1,9 @@
 import argparse
 import music21
 
-from sejong_music.jeonggan_utils import JGConverter
+from sejong_music.jeonggan_utils import JGConverter, GencodeConverter
+from pathlib import Path
+
 
 
 def get_args():
@@ -22,5 +24,11 @@ if __name__ == "__main__":
 
   with open(args.output_path, 'w') as f:
     f.write('\n\n'.join(converted))
+    
+  gen_str = GencodeConverter.convert_txt_to_gencode(args.output_path)
+  out_path = Path(args.output_path)
+  
+  with open(out_path.parent / (out_path.stem + '_gen.txt'), 'w') as f:
+    f.write(gen_str)
 
   print(f"Converted jeonggan is saved at {args.output_path}")

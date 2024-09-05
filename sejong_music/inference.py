@@ -13,7 +13,8 @@ from sejong_music.model_zoo import Seq2seq, QkvAttnSeq2seqOrch, get_emb_total_si
 from sejong_music.utils import convert_note_to_sampling, convert_onset_to_sustain_token, make_offset_set
 from sejong_music.sampling_utils import nucleus
 from sejong_music.constants import get_dynamic_template_for_orch, get_dynamic, POSITION, DURATION, PITCH
-from sejong_music.jg_to_staff_converter import ABCtoGenConverter, BeatToGenConverter
+from sejong_music.jg_to_staff_converter import ABCtoGenConverter
+from sejong_music.abc_utils import convert_beat_jg_to_gen
 
 class Inferencer:
   def __init__(self, 
@@ -297,11 +298,12 @@ class JGInferencer(Inferencer):
                is_condition_shifted: bool, 
                is_orch: bool, 
                temperature: float = 1, 
-               top_p: float = 1):
+               top_p: float = 1,
+               is_abc: bool = False):
     super().__init__(model, is_condition_shifted, is_orch, is_sep=False, temperature=temperature, top_p=top_p)
     self.use_offset = 'beat:0' in self.tokenizer.vocab
     if self.use_offset:
-      self.beat2gen = BeatToGenConverter()
+      self.beat2gen = convert_beat_jg_to_gen
     
   def get_start_token(self, inst:str):
     return torch.LongTensor(self.tokenizer(['start', 'prev|', 'jg:0', 'gak:0', inst])).unsqueeze(0)
@@ -314,8 +316,8 @@ class JGInferencer(Inferencer):
     src_decoded = self.tokenizer.decode(src[1:-1])
     out_decoded = self.tokenizer.decode(output)
     if self.use_offset:
-      converted = self.beat2gen([x[0] for x in out_decoded]) + ' \n '
-      converted = [x for x in converted.split(' ') if x != ''] 
+      converted = self.beat2gen([x[0] for x in out_decoded]) + ['\n']
+      converted = [x for x in converted if x != ''] 
       shorter_len = min(len(converted), len(out_decoded))
       out_decoded = [[converted[i]] + out_decoded[i][1:] for i in range(shorter_len)]
     return src_decoded, out_decoded, other_out
@@ -353,7 +355,7 @@ class JGInferencer(Inferencer):
     # while True:
     condition_tokens = self.encode_condition_token(prev_pos_token, current_jg_idx, current_gak_idx, inst_name)
 
-    for i in tqdm(range(2000), leave=False):
+    for i in range(2000):
       input_token = torch.cat(final_tokens, dim=0) if isinstance(self.model, JeongganTransSeq2seq) else selected_token
       logit, encoder_output, attention_weight = self.model._run_inference_on_step(input_token, encoder_output)
       selected_token = self.sampling_process(logit)
@@ -450,6 +452,7 @@ class ABCInferencer(JGInferencer):
 
       if current_beat >= measure_duration:
           decoded_token = '\n'
+          selected_token = torch.LongTensor([[self.tokenizer.tok2idx['\n']]]).to(dev)
           
       if decoded_token == '\n':
         current_gak_idx += 1
@@ -459,16 +462,16 @@ class ABCInferencer(JGInferencer):
           
       if decoded_token in self.tokenizer.dur_vocab:
         current_beat += decoded_token
-        if first_gak:
-          if current_beat >= first_measure_duration:
-            current_jg_idx += 1
-            current_beat = 0.0
-        elif current_beat >= second_measure_duration:
-          current_gak_idx += 1
-          current_jg_idx = 0
-          current_beat = 0.0
-
-      if f'jg:{current_jg_idx}' not in self.tokenizer.vocab or f'gak:{current_gak_idx}' not in self.tokenizer.vocab:
+        # if first_gak:
+        #   if current_beat >= first_measure_duration:
+        #     current_jg_idx += 1
+        #     current_beat = 0.0
+        # elif current_beat >= second_measure_duration:
+        #   current_gak_idx += 1
+        #   current_jg_idx = 0
+        #   current_beat = 0.0
+      # print(decoded_token, current_beat, current_gak_idx)
+      if f'jg:{str(int(current_beat//1))}' not in self.tokenizer.vocab or f'gak:{current_gak_idx}' not in self.tokenizer.vocab:
         break
         
       condition_tokens = self.encode_condition_token(current_beat, current_gak_idx, inst_name)

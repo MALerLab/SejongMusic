@@ -17,8 +17,8 @@ trainer_class: JeongganTrainer
 
 
 data:
-  use_pitch_modification: True
-  modification_ratio: 0.3
+  use_pitch_modification: False
+  modification_ratio: 0.1
   min_meas: 4
   max_meas: 480
   sampling_rate: 2

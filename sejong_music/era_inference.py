@@ -30,7 +30,7 @@ class EraTransformer:
   omr2gen = GencodeConverter
   gen2staff = JGToStaffConverter()
 
-  def __init__(self, state_dir:str, device='cuda'):
+  def __init__(self, state_dir:str, device='cuda', is_chp=False):
     self.state_dir = Path(state_dir)
     self.model, self.tokenizer, self.config = self.load_model_tokenizer_from_state_dir(state_dir)
     self.model.to(device)
@@ -39,7 +39,10 @@ class EraTransformer:
     self.mask_id = self.tokenizer.tok2idx['mask']
     self.sus_id = self.tokenizer.tok2idx['-']
     self.non_orn_id = self.tokenizer.tok2idx['비어있음']
-    self.masker = EraTransformMasker(self.mask_id, self.sus_id)
+    if is_chp:
+      self.masker = CHPMasker(self.mask_id, self.sus_id)
+    else:
+      self.masker = EraTransformMasker(self.mask_id, self.sus_id)
     
     
   @staticmethod
@@ -112,7 +115,7 @@ class EraTransformer:
     roll = self.tokenizer.decode(x)
     omr_str = self.roll2omr(roll)
     gen_str = self.omr2gen.convert_lines_to_gencode(omr_str.split('\n')) + ' \n'
-    notes, score = self.gen2staff(gen_str, time_signatures='30/8')
+    notes, score = self.gen2staff(gen_str, time_signature='30/8')
     return notes, score
     
   
@@ -132,7 +135,7 @@ class EraTransformer:
     notes, score = self.decode_result(x)
     
     org_token = piece.sliced_parts_by_measure[idx][inst]
-    org_notes, org_score = self.gen2staff(org_token)
+    org_notes, org_score = self.gen2staff(org_token, time_signature='30/8')
 
     total_score = music21.stream.Score()
     total_score.insert(0, score)
@@ -158,7 +161,59 @@ class EraTransformer:
           frame = ['mask', 'mask', f'beat:{k}', f'jg:{j}', f'gak:{i}', inst]
           outputs.append(frame)
     return torch.LongTensor(self.tokenizer(outputs))
-    
+  
+  def full_generation(self, gen_str:str, inst:str='piri', num_context_measure=2, num_jg_per_gak=20):
+    total_gen_str = ''
+    num_frames_per_measure = 6 * num_jg_per_gak
+    num_use_frames = num_frames_per_measure * num_context_measure
+    piece = JeongganPiece(None, gen_str=gen_str, inst_list=[inst])
+    x = piece.convert_tokens_to_roll(piece.sliced_parts_by_measure[0][inst], inst)
+    x = self.convert_to_input_format(x, add_start_end=False)
+    cond = self.make_dummy_condition_tensor(num_jg=num_jg_per_gak)
+    if num_jg_per_gak == 20:
+      x, loss_mask = self.masker.mask_except_note_onset_to_twenty(x, cond)
+    elif num_jg_per_gak == 10:
+      x, loss_mask = self.masker.mask_except_note_onset_to_ten(x, cond)
+    else:
+      raise NotImplementedError
+    x = self.unmask_pitch_and_ornaments(x.to(self.device), loss_mask.to(self.device), 2)
+
+    prev_x = x[1+num_frames_per_measure:1+num_use_frames+num_frames_per_measure]
+    new_x = x[1:1+num_use_frames+num_frames_per_measure]
+    roll = self.tokenizer.decode(new_x)
+    omr_str = self.roll2omr(roll)
+    new_gen_str = self.omr2gen.convert_lines_to_gencode(omr_str.split('\n')) + ' \n '
+    total_gen_str += new_gen_str
+
+    for idx in tqdm(range(1, len(piece.sliced_parts_by_measure))):
+    # for idx in tqdm(range(1, 10)):
+      x = piece.convert_tokens_to_roll(piece.sliced_parts_by_measure[idx][inst], inst)
+      x = self.convert_to_input_format(x, add_start_end=False)
+      cond = self.make_dummy_condition_tensor(num_jg=num_jg_per_gak)
+      if num_jg_per_gak == 20:
+        x, loss_mask = self.masker.mask_except_note_onset_to_twenty(x, cond)
+      elif num_jg_per_gak == 10:
+        x, loss_mask = self.masker.mask_except_note_onset_to_ten(x, cond)
+      else:
+        raise NotImplementedError
+      x[1:1+num_use_frames, :2] = prev_x[:, :2]
+      loss_mask[1:1+num_use_frames, :2] = 0
+      # x, loss_mask = self.aug_form_to_input_form(x), self.aug_form_to_input_form(loss_mask)
+      x = self.unmask_pitch_and_ornaments(x.to(self.device), loss_mask.to(self.device), 2)
+
+      prev_x = x[1+num_frames_per_measure:1+num_frames_per_measure+num_use_frames]
+      if idx == len(piece.sliced_parts_by_measure) - 1:
+        new_x = x[1+num_use_frames:-1]
+      else:
+        new_x = x[1+num_use_frames:1+num_use_frames+num_frames_per_measure]
+      # total_outs.append(new_x)
+      roll = self.tokenizer.decode(new_x)
+      omr_str = self.roll2omr(roll)
+      new_gen_str = self.omr2gen.convert_lines_to_gencode(omr_str.split('\n')) + ' \n '
+      total_gen_str += new_gen_str
+
+
+    return total_gen_str
 
 
 class EraTransformMasker:
@@ -172,16 +227,29 @@ class EraTransformMasker:
     eight_to_ten[i] = i+12
   eight_to_ten = torch.LongTensor(eight_to_ten)
 
+  eight_to_twenty = [0] * 6 * 8
+  for i in range(12):
+    eight_to_twenty[i] = i * 2
+  for i in range(12, 18):
+    eight_to_twenty[i] = 36 + (i - 12) * 2
+  for i in range(18, 24):
+    eight_to_twenty[i] = 60 + (i - 18) * 2
+  for i in range(24, 30):
+    eight_to_twenty[i] = 60 + (i - 24) * 2
+  for i in range(30, 48):
+    eight_to_twenty[i] = 84 + (i - 30) * 2
+  eight_to_twenty = torch.LongTensor(eight_to_twenty)
+
   def __init__(self, mask_id:int, sus_id:int):
     self.mask_id = mask_id
     self.sus_id = sus_id
-    model_path = '/home/teo/userdata/git_libraries/SejongMusic/models/align_predictor.pt'
-    vocab_path = '/home/teo/userdata/git_libraries/SejongMusic/models/align_predictor_vocab.json'  
-    self.tokenizer = SingleVocabTokenizer(None, json_fn=vocab_path)
-    self.align_model = AlignPredictor(len(self.tokenizer.vocab), 64)
-    self.align_model.load_state_dict(torch.load(model_path))
-    self.align_model.eval()
-    self.update_vocab()
+    # model_path = '/home/teo/userdata/git_libraries/SejongMusic/models/align_predictor.pt'
+    # vocab_path = '/home/teo/userdata/git_libraries/SejongMusic/models/align_predictor_vocab.json'  
+    # self.tokenizer = SingleVocabTokenizer(None, json_fn=vocab_path)
+    # self.align_model = AlignPredictor(len(self.tokenizer.vocab), 64)
+    # self.align_model.load_state_dict(torch.load(model_path))
+    # self.align_model.eval()
+    # self.update_vocab()
   
   
   def update_vocab(self):
@@ -240,7 +308,27 @@ class EraTransformMasker:
     
     return masked, loss_mask
 
-  
+  def mask_except_note_onset_to_twenty(self, x:torch.Tensor, cond:torch.Tensor):
+    if (x.shape[0] - 2) % self.num_beat == 0:
+      x = x[1:-1]
+
+    loss_mask = torch.ones_like(cond, dtype=torch.long)
+    loss_mask[:, 2:] = 0
+    masked = cond.clone()
+
+    frame_ids, = torch.where(x[:,0] != self.sus_id)
+
+    gak_pos = frame_ids // (8 * self.num_beat)
+    converted_frame_ids = self.eight_to_twenty[frame_ids % (8 * self.num_beat)] + gak_pos * 20 * self.num_beat
+
+    masked[converted_frame_ids,0] = x[frame_ids, 0]
+    loss_mask[converted_frame_ids, 0] = 0
+    
+    masked = torch.cat([torch.LongTensor([[1] * masked.shape[1]]), masked, torch.LongTensor([[2] * masked.shape[1]]) ], dim=0 )
+    loss_mask = torch.cat([torch.LongTensor([[0] * loss_mask.shape[1]]), loss_mask, torch.LongTensor([[0] * loss_mask.shape[1]]) ], dim=0 )
+    
+    return masked, loss_mask
+
   @staticmethod
   def convert_offset_to_strength(note:Note, era_idx):
     offset = note.jg_offset + note.beat_offset
@@ -273,3 +361,51 @@ class EraTransformMasker:
       if keep:
         new_notes.append(note)
     return new_notes
+  
+
+class CHPMasker(EraTransformMasker):
+  num_beat = 6
+  eight_to_ten = [0] * 6 * 8
+  for i in range(18):
+    eight_to_ten[i] = i
+  for i in range(18, 36):
+    eight_to_ten[i] = i + 12
+  for i in range(36, 48):
+    eight_to_ten[i] = i + 6
+  eight_to_ten = torch.LongTensor(eight_to_ten)
+
+  eight_to_twenty = [0] * 6 * 8
+  for i in range(18):
+    eight_to_twenty[i] = i * 2
+  for i in range(18, 36):
+    eight_to_twenty[i] = 60 + (i - 18) * 2
+  for i in range(36, 48):
+    eight_to_twenty[i] = 108 + (i - 36)
+  eight_to_twenty = torch.LongTensor(eight_to_twenty)
+  
+  def __init__(self, mask_id: int, sus_id: int):
+    super().__init__(mask_id, sus_id)
+
+  
+if __name__ == "__main__":
+  num_jg = 20
+  
+  era_transformer = EraTransformer('models/bert_checkpoints', device='cuda:0', is_chp=True)
+  gen_str = open('music_score/chihwapyeong_down_gen.txt').read()
+  total_gen_str = era_transformer.full_generation(gen_str, num_jg_per_gak=num_jg)
+  with open(f'music_score/chihwapyeong_down_bert_{num_jg}beat_gen.txt', 'w') as f:
+    f.write(total_gen_str)
+  notes, score = era_transformer.gen2staff(total_gen_str, time_signature=f'{int(num_jg)*3}/8')
+  score.write('musicxml', f'chp_bert_{num_jg}beat2.musicxml')
+
+  
+  '''
+  num_jg = 20
+  era_transformer = EraTransformer('models/bert_checkpoints', device='cuda:0')
+  gen_str = open('music_score/chwipunghyeong_gen.txt').read()
+  total_gen_str = era_transformer.full_generation(gen_str, num_jg_per_gak=num_jg)
+  with open(f'music_score/chwipunghyeong_bert_{num_jg}beat_gen.txt', 'w') as f:
+    f.write(total_gen_str)
+  notes, score = era_transformer.gen2staff(total_gen_str, time_signature=f'{int(num_jg)*3}/8')
+  score.write('musicxml', f'cph_bert_{num_jg}beat.musicxml')
+  '''

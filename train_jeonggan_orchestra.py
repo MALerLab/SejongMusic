@@ -22,7 +22,7 @@ from sejong_music.full_inference import Generator
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
-  return f'{current_time_in_str}_dataclass={config.dataset_class}_model_depth={config.model.depth}_num_head={config.model.num_heads}_dropout={config.model.dropout}_is_pos_counter={config.data.is_pos_counter}_{config.general.exp_name}_{config.model_class}'
+  return f'{current_time_in_str}_data={config.dataset_class}_depth={config.model.depth}_head={config.model.num_heads}_drop={config.model.dropout}_is_beat={config.data.use_offset}_pos_count={config.data.is_pos_counter}_{config.general.exp_name}_{config.model_class}'
 
 @hydra.main(config_path='yamls/', config_name='transformer_jeonggan')
 def main(config: DictConfig):
@@ -135,7 +135,7 @@ def main(config: DictConfig):
                                 scheduler=scheduler, 
                                 use_fp16=(device=='cuda'),
                                 is_pos_counter = config.data.is_pos_counter,
-                                epoch_per_infer=50,
+                                epoch_per_infer=20,
                                 min_epoch_for_infer=5,
                                 is_abc=dataset_class==ABCDataset, # 이거 확인!
                                 )

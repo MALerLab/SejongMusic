@@ -6,7 +6,7 @@ from sejong_music.constants import PITCH
 
 
 def per_jg_note_acc(pred, gt, inst, tokenizer, 
-                    num_frame_per_jg=6, strict=True, pitch_only=True):
+                    num_frame_per_jg=6, strict=True, pitch_only=False):
   '''
   Calculates per-jeonggan note accuracy.
 
@@ -38,9 +38,12 @@ def per_jg_note_acc(pred, gt, inst, tokenizer,
   
   if pitch_only:
     num_total = np.isin(gt_roll[:, 0], PITCH).sum()
+    num_pred_total = np.isin(pred_roll[:, 0], PITCH).sum()
   else:
     num_total = (gt_roll[:, 0] != '-').sum()
+    num_pred_total = (pred_roll[:, 0] != '-').sum()
   num_correct = 0
+  
   for i in range(0, pred_roll.shape[0], num_frame_per_jg):
     pred_chunk = pred_roll[i:i+num_frame_per_jg, 0]
     gt_chunk = gt_roll[i:i+num_frame_per_jg, 0]
@@ -54,12 +57,18 @@ def per_jg_note_acc(pred, gt, inst, tokenizer,
       for note in gt_chunk[mask]:
         if note in pred_chunk:
           num_correct += 1
+  
+  num_pred_total = max(num_pred_total, 1)
+  precision = num_correct / num_pred_total
+  recall = num_correct / num_total
+  
+  f1 = 2 * precision * recall / (precision + recall)
 
-  return num_correct / num_total
+  return f1
 
 
 def onset_f1(pred, gt, inst, tokenizer, 
-             num_frame_per_jg=6, pitch_only=True):
+             num_frame_per_jg=6, pitch_only=False):
   '''
   Calculates per-jeonggan onset f1.
   Ornamentations in note positions are also considered as onsets.
