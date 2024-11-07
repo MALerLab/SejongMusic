@@ -1,6 +1,7 @@
 save_name: CPH_JG_TFM
-inst_state_dir: wandb/run-20240401_110925-gfmcjxfa/files/checkpoints
-input_xml: gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml
+# inst_state_dir: wandb/run-20240401_110925-gfmcjxfa/files/checkpoints
+inst_state_dir: models/transformer_large_checkpoints
+# input_xml: gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml
 use_total_model: true
 output_dir: gen_results/
 
@@ -9,7 +10,7 @@ class_names:
   inferencer: JGInferencer
   tokenizer: JeongganTokenizer
 
-inst_codes: ['geomungo', 'gayageum', 'ajaen', 'haegeum', 'piri', 'daegeum']
+inst_codes: ['piri','geomungo', 'gayageum', 'ajaeng', 'haegeum',  'daegeum']
 
 temperature: 0.9
 top_p: 0.9
