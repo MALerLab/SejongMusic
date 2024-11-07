@@ -11,7 +11,7 @@ from music21 import stream, environment
 from .metric import get_similarity_with_inference, get_correspondence_with_inference
 from .utils import make_dynamic_template
 from .constants import MEAS_LEN_BY_IDX, get_dynamic_template_for_orch
-from .inference import sequential_inference, Inferencer, JGInferencer
+from .inference import sequential_inference, Inferencer, JGInferencer, JGSimpleInferencer, ABCInferencer
 # from .yeominrak_processing import SamplingScore
 from .evaluation import fill_pitches
 from .decode import MidiDecoder, OrchestraDecoder
@@ -38,8 +38,8 @@ class Trainer:
                save_log=True, 
                scheduler=None, 
                clip_grad_norm=1.0,
-               epoch_per_infer=50,
-               min_epoch_for_infer=250,
+               epoch_per_infer=5,
+               min_epoch_for_infer=5,
                use_fp16=False):
   # def __init__(self, **kwargs):
   #   for key, value in kwargs.items():
@@ -79,6 +79,8 @@ class Trainer:
     self.measure_match = []
     self.pitch_similarity = []
     self.dynamic_similarity = []
+    
+    self.best_valid_acc_dict = {}
     
     self.inferencer = Inferencer( model, 
                               is_condition_shifted=model.is_condition_shifted,  
@@ -126,12 +128,21 @@ class Trainer:
           self.best_valid_loss = validation_loss
           torch.save(self.model.state_dict(), self.save_dir / 'best_loss_model.pt')
         
-      if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0:
+      if (iteration + 1) % (100 * num_iter_per_epoch) == 0:
         torch.save(self.model.state_dict(), self.save_dir / f'iter{iteration+1}_model.pt')
+      torch.save(self.model.state_dict(), self.save_dir / 'last_model.pt')
       
       if (iteration + 1) % (self.epoch_per_infer * num_iter_per_epoch) == 0 and iteration  > self.min_epoch_for_infer * num_iter_per_epoch:
         self.model.eval()
         valid_metrics:dict = self.make_inference_result()
+        for key in valid_metrics.keys():
+          if key in self.best_valid_acc_dict:
+            if self.best_valid_acc_dict[key] < valid_metrics[key]:
+              self.best_valid_acc_dict[key] = valid_metrics[key]
+              torch.save(self.model.state_dict(), self.save_dir / f'best_{key}_model.pt')
+              print(f"Best {key} Model Saved at {iteration}th iteration! {key}: {valid_metrics[key]}")
+          else:
+            self.best_valid_acc_dict[key] = valid_metrics[key]
         if self.save_log:
           wandb.log(valid_metrics, step=self.iteration)
         self.model.train()
@@ -509,9 +520,12 @@ class JeongganTrainer(Trainer):
                save_log=True, 
                scheduler=None, 
                clip_grad_norm=1,
-               epoch_per_infer=50,
+               use_fp16=True, 
+               epoch_per_infer=5,
                min_epoch_for_infer=5,
-               use_fp16=True):
+               is_pos_counter=False, 
+               is_abc=False):
+
     super().__init__(model, 
                      optimizer, 
                      loss_fn, 
@@ -525,8 +539,13 @@ class JeongganTrainer(Trainer):
                      epoch_per_infer=epoch_per_infer,
                      min_epoch_for_infer=min_epoch_for_infer,
                      use_fp16=use_fp16)
-    self.inferencer = JGInferencer(model, True, True, 1.0, 0.9)
-    self.decoder = JGToStaffConverter(dur_ratio=1.5)
+    if is_abc:
+      self.inferencer = ABCInferencer(model, True, True, 1.0, 0.9)
+    elif is_pos_counter:
+      self.inferencer = JGInferencer(model, True, True, 1.0, 0.9)
+    else:  
+      self.inferencer = JGSimpleInferencer(model, True, True, 1.0, 0.9)
+    self.decoder = JGToStaffConverter(dur_ratio=1.5, is_abc=is_abc)
     
   
   
@@ -573,36 +592,75 @@ class JeongganTrainer(Trainer):
     # for idx in range(self.valid_loader.batch_size):
     selected_idx_list = [i for i in range(len(loader.dataset))]
     note_acc = []
+    note_none_strict = []
     onset_f1_score = []
     onset_prec_score = []
     onset_recall_score = []
+    jg_matched = []
     # dynamic_templates = make_dynamic_template(offset_list=MEAS_LEN_BY_IDX)
     for idx in selected_idx_list:
       sample, tgt, shifted_tgt = loader.dataset[idx]
       input_part_idx = sample[0][-1]
       target_part_idx = self.model.tokenizer.vocab[tgt[0][-1].item()]
       # if input_part_idx < 2: continue
-      src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
       try:
-        jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-        f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-      except:
-        jg_note_acc = 0
-        f1, prec, recall = 0, 0, 0
-      try:
-        note_dict, stream = self.decoder.convert_inference_result(output, src, self.model.tokenizer.decode(shifted_tgt))
-        if write_png:
-          stream.write('musicxml.png', fp=str(self.save_dir / f'{input_part_idx}-{target_part_idx}.png'))
-          if self.save_log:
-            wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
-                      step=self.iteration)
+        src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
       except Exception as e:
         print(f"Error occured in inference result: {e}")
-        print(src)
-        print(output)
-        print([note[2] for note in output])
-        is_match = False
+        continue
+        # print([note[2] for note in output])
+      if isinstance(self.inferencer, ABCInferencer):
+        num_gen_jg = sum([1 for note in output if note[0] in ('|', '\n')])
+        gen_converted_tgt = self.inferencer.jg_decoder(self.inferencer.tokenizer.decode(shifted_tgt)).split(' ')
+        num_tg_jg = sum([1 for note in gen_converted_tgt if note in ('|', '\n')])
+      else:
+        num_tg_jg = sum([1 for note in self.inferencer.tokenizer.decode(shifted_tgt) if note in ('|', '\n')])
+        num_gen_jg = sum([1 for note in output if note[0] in ('|', '\n')])
+      jg_matched.append(int(num_tg_jg == num_gen_jg))
+      if num_tg_jg != num_gen_jg:
+        print(f"Generated JG mismatch: num_tg_jg: {num_tg_jg}, num_gen_jg: {num_gen_jg}")
+        continue
+      try:
+        if isinstance(self.inferencer, ABCInferencer):
+          tgt_decoded = self.inferencer.tokenizer.decode(shifted_tgt)
+          # tgt_decoded = [[token[0], token[-1]] for token in tgt_decoded]
+          gen_str = self.inferencer.jg_decoder(tgt_decoded)
+          gen_tokens = gen_str.split(' ')
+          output_decoded = [x[0] for x in output]
+          jg_note_acc = per_jg_note_acc(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          non_strict_acc = per_jg_note_acc(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
+          f1, prec, recall = onset_f1(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+
+        elif self.inferencer.use_offset:
+          shifted_tgt = self.inferencer.beat2gen(self.inferencer.tokenizer.decode(shifted_tgt))
+          shifted_tgt = [x for x in shifted_tgt if x != '']
+          out_decoded = [x[0] for x in output]
+          jg_note_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          non_strict_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
+          f1, prec, recall = onset_f1(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+        else:
+          jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          non_strict_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
+          f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+      except Exception as e:
+        print(f"Error occured in inference evaluation result: {e}")
+        jg_note_acc, non_strict_acc = 0, 0
+        f1, prec, recall = 0, 0, 0
+      # try:
+      #   note_dict, stream = self.decoder.convert_inference_result(output, src, self.model.tokenizer.decode(shifted_tgt))
+      #   if write_png:
+      #     stream.write('musicxml.png', fp=str(self.save_dir / f'{input_part_idx}-{target_part_idx}.png'))
+      #     if self.save_log:
+      #       wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
+      #                 step=self.iteration)
+      # except Exception as e:
+      #   print(f"Error occured in inference result: {e}")
+      #   print(src)
+      #   print(output)
+      #   # print([note[2] for note in output])
+      #   is_match = False
       note_acc.append(jg_note_acc)
+      note_none_strict.append(non_strict_acc)
       onset_f1_score.append(f1)
       onset_prec_score.append(prec)
       onset_recall_score.append(recall)
@@ -638,13 +696,16 @@ class JeongganTrainer(Trainer):
           wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
                     step=self.iteration)
       '''
-    
-    note_acc = sum(note_acc)/len(note_acc)
-    onset_f1_score = sum(onset_f1_score)/len(onset_f1_score)
-    onset_prec_score = sum(onset_prec_score)/len(onset_prec_score)
-    onset_recall_score = sum(onset_recall_score)/len(onset_recall_score)
-    
-    return {'note_acc': note_acc, 'onset_f1': onset_f1_score, 'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score}
+
+    jg_matched_score = sum(jg_matched)/len(selected_idx_list)
+
+    note_acc = sum(note_acc)/len(selected_idx_list)
+    note_none_strict = sum(note_none_strict)/len(selected_idx_list)
+    onset_f1_score = sum(onset_f1_score)/len(selected_idx_list)
+    onset_prec_score = sum(onset_prec_score)/len(selected_idx_list)
+    onset_recall_score = sum(onset_recall_score)/len(selected_idx_list)
+      
+    return {'note_acc': note_acc, 'onset_f1': onset_f1_score, 'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score, 'jg_matched': jg_matched_score, 'note_none_strict': note_none_strict}
 
 class BertTrainer(JeongganTrainer):
   def __init__(self, 
@@ -658,7 +719,7 @@ class BertTrainer(JeongganTrainer):
                save_log=True, 
                scheduler=None, 
                clip_grad_norm=1,
-               epoch_per_infer=50,
+               epoch_per_infer=10,
                min_epoch_for_infer=5,
                use_fp16=True):
     super().__init__(model, 

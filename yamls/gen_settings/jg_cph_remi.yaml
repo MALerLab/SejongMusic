@@ -1,17 +1,17 @@
 save_name: CPH_JG_TFM
-# inst_state_dir: wandb/run-20240401_110925-gfmcjxfa/files/checkpoints
-inst_state_dir: models/transformer_large_checkpoints
+inst_state_dir: wandb/run-20240408_231102-rx8m1mtp/files/checkpoints
 # input_xml: gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml
+input_txt: music_score/chwipunghyeong_bert_gen.txt
 use_total_model: true
 output_dir: gen_results/
-use_offset: false
+use_offset: true
 
 class_names:
   model: JeongganTransSeq2seq
   inferencer: JGInferencer
   tokenizer: JeongganTokenizer
 
-inst_codes: ['piri','geomungo', 'gayageum', 'ajaeng', 'haegeum',  'daegeum']
+inst_codes: ['geomungo', 'gayageum', 'ajaen', 'haegeum', 'piri', 'daegeum']
 
 temperature: 0.9
 top_p: 0.9

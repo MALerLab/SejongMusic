@@ -14,15 +14,17 @@ from sejong_music import model_zoo, jg_code, inference
 from sejong_music.yeominrak_processing import OrchestraScoreSeq, ShiftedAlignedScore, Tokenizer
 from sejong_music.model_zoo import JeongganTransSeq2seq
 from sejong_music.decode import MidiDecoder, OrchestraDecoder
-from sejong_music.inference_utils import prepare_input_for_next_part, get_measure_specific_output, fix_measure_idx, fill_in_source, get_measure_shifted_output, recover_beat, round_number
 from sejong_music.inference import JGInferencer
-from sejong_music.jg_to_staff_converter import JGToStaffConverter, JGCodeToOMRDecoder
-from sejong_music.jg_code import JeongganDataset, JeongganTokenizer, JeongganPiece
+from sejong_music.jg_to_staff_converter import JGToStaffConverter, JGCodeToOMRDecoder, ABCtoGenConverter
+from sejong_music.jg_code import JeongganDataset, JeongganTokenizer, JeongganPiece, ABCPiece, ABCDataset
 from sejong_music.jeonggan_utils import JGConverter, GencodeConverter
+from sejong_music.abc_utils import convert_beat_jg_to_gen
 
 
 class Generator:
-  def __init__(self, config, model=None, output_dir=None, inferencer=None):
+  def __init__(self, config, model=None, output_dir=None, inferencer=None, is_abc=False):
+    self.is_abc = is_abc
+    self.jg_decoder = ABCtoGenConverter()
     if config:
       self.config = config
       self.output_dir = Path(config.output_dir)
@@ -30,20 +32,24 @@ class Generator:
       self.model = self._load_model()
       self.tokenizer = self.model.tokenizer
       self.inferencer = self._get_inferencer()
+      self.use_offset = config.use_offset
     else:
       self.model = model
       self.tokenizer = self.model.tokenizer
       self.inferencer = inferencer
       self.output_dir = output_dir
+      self.use_offset = 'beat:0' in self.tokenizer.vocab
     self.jg_converter = JGConverter(jeonggan_quarter_length=1.5)
     self.gen_converter = GencodeConverter()
     self.jg_to_staff_converter = JGToStaffConverter()
     self.jg_to_omr_converter = JGCodeToOMRDecoder()
+    self.beat_to_gen_converter = convert_beat_jg_to_gen
     
   
   def _load_model(self):
     # model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter72000_model.pt'
     model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter34800_model.pt'
+    # model_state_path = Path(self.config.inst_state_dir) / 'inst_0/last_model.pt'
     tokenizer_vocab_path = Path(self.config.inst_state_dir) / 'tokenizer_vocab.json'
     model_config_path = Path(self.config.inst_state_dir) / 'config.yaml'
     tokenizer:JeongganTokenizer = getattr(jg_code, self.config.class_names.tokenizer)(None, None, json_fn=tokenizer_vocab_path)
@@ -58,7 +64,8 @@ class Generator:
                                                                                      self.tokenizer, 
                                                                                      is_orch=True,
                                                                                      temperature=self.config.temperature,
-                                                                                     top_p=self.config.top_p)
+                                                                                     top_p=self.config.top_p,
+                                                                                     is_abc=self.is_abc)
     return inferencer
 
   def convert_xml_to_gen_code(self, score_fn, part_idx=-1):
@@ -71,8 +78,12 @@ class Generator:
     return gen_str
 
   def prepare_dataset(self, gen_str, inst_list:List[str]):
-    piece = JeongganPiece(None, gen_str=gen_str, inst_list=inst_list)
-    dataset = JeongganDataset(piece_list=[piece], tokenizer=self.tokenizer)
+    if self.is_abc:
+      piece = ABCPiece(None, gen_str=gen_str, inst_list=inst_list)
+      dataset = ABCDataset(piece_list=[piece], tokenizer=self.tokenizer)
+    else:
+      piece = JeongganPiece(None, gen_str=gen_str, inst_list=inst_list, use_offset=self.use_offset)
+      dataset = JeongganDataset(piece_list=[piece], tokenizer=self.tokenizer, use_offset=self.use_offset)
     
     return dataset
   
@@ -86,15 +97,24 @@ class Generator:
 
     for i in tqdm(range(len(dataset))):
     # for i in tqdm(range(10)):
-      sample, _, _ = dataset.get_processed_feature(condition_instruments, condition_instruments[0], i)  
-      sample = torch.LongTensor(sample)        
-      _, output_decoded, (attention_map, output, new_out) = self.inferencer.inference(sample, target_inst, prev_generation=prev_generation)
+      sample, _, _ = dataset.get_processed_feature(condition_instruments, condition_instruments[0], i, force_target_inst=target_inst)  
+      sample = torch.LongTensor(sample)
+      while True:
+        try:        
+          _, output_decoded, (attention_map, output, new_out) = self.inferencer.inference(sample, target_inst, prev_generation=prev_generation)
+          break
+        except Exception as e:
+          print('에러가 났습니다. 다시 시도합니다.')
+        
       if i == 0:
         sel_out = torch.cat([output[0:1]] + [self.get_measure_specific_output(output, self.tokenizer.tok2idx[f'gak:{i}']) for i in range(0,3)], dim=0)
       else:
         sel_out = self.get_measure_specific_output(output, self.tokenizer.tok2idx[f'gak:2']) 
       # pp.pprint(output_decoded[:5])
-      prev_generation = self.get_measure_shifted_output(output, self.tokenizer.tok2idx['gak:1'], self.tokenizer.tok2idx['gak:3'], self.tokenizer.tok2idx['prev|'])
+      if self.is_abc:
+        prev_generation = self.get_measure_shifted_output(output, self.tokenizer.tok2idx['gak:1'], self.tokenizer.tok2idx['gak:3'], self.tokenizer.tok2idx['beat:0'])
+      else: 
+        prev_generation = self.get_measure_shifted_output(output, self.tokenizer.tok2idx['gak:1'], self.tokenizer.tok2idx['gak:3'], self.tokenizer.tok2idx['prev|'])
       outputs.append(sel_out)
     outputs.append(self.get_measure_specific_output(output, self.tokenizer.tok2idx[f'gak:3'])) # add last measure
     outputs_tensor = torch.cat(outputs, dim=0)
@@ -112,8 +132,16 @@ class Generator:
       outputs_tensor = self.make_full_inference_on_dataset(dataset, 
                                                            target_inst=inst, 
                                                            condition_instruments=target_order[:i])
-      gen_str = ' '.join(self.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
-    
+      
+      if self.use_offset:
+        beat_tokens = self.tokenizer.decode(outputs_tensor[:, 0])
+        new_gen_str = self.beat_to_gen_converter(beat_tokens)
+        gen_str = new_gen_str + ' \n\n ' + gen_str
+      elif self.is_abc:
+        decoded_str = self.jg_decoder(outputs_tensor)
+        gen_str = decoded_str[:,0] + ' \n\n ' + gen_str
+      else:
+        gen_str = ' '.join(self.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
     return gen_str
     
 
@@ -167,8 +195,8 @@ class Generator:
       if output[j][-2] == measure_idx_end:
         break
     output_tokens_from_second_measure = output[i:j].clone()
-    output_tokens_from_second_measure[0, 0] = 1
-    output_tokens_from_second_measure[0, 1] = initial_prev_pos
+    output_tokens_from_second_measure[0, 0] = 1 # start token의 인덱스
+    output_tokens_from_second_measure[0, 1] = initial_prev_pos #beat 0의 인덱스
     output_tokens_from_second_measure[:, -2] -= 1 # gak_idx is -2
     return output_tokens_from_second_measure
   
@@ -177,27 +205,42 @@ class Generator:
 
 if __name__ == '__main__':
   config = OmegaConf.load('yamls/gen_settings/jg_cph.yaml')
+  out_dir = Path('gen_results/')
+  out_dir.mkdir(parents=True, exist_ok=True)
+  name = 'chihwapyeong_bert_orchestra_20beat_down_org'
+  
+  # inst_cycles = ['piri', 'daegeum',  'haegeum', 'geomungo', 'gayageum', 'ajaeng']
+  inst_cycles = ['piri', 'geomungo', 'gayageum', 'ajaeng', 'haegeum', 'daegeum']
 
   gen = Generator(config)
   gen.model.to('cuda')
-  txt_fn = 'music_score/chwipunghyeong_bert_gen.txt'
-  output_str = gen.inference_from_gen_code(txt_fn, ['piri', 'geomungo', 'gayageum', 'ajaeng', 'haegeum',  'daegeum'])
-  with open('gen_results/chwipunghyeong_bert_orchestration_gencode4.txt', 'w') as f:
+  # txt_fn = 'music_score/chwipunghyeong_bert_20beat_gen.txt'
+  # txt_fn = 'music_score/chwipunghyeong_bert_gen.txt'
+  # txt_fn = 'music_score/chihwapyeong_bert_20beat_gen.txt'
+  txt_fn = 'music_score/chihwapyeong_down_bert_20beat_gen.txt'
+  
+  output_str = gen.inference_from_gen_code(txt_fn, inst_cycles)
+  with open(out_dir / f'{name}_gen.txt', 'w') as f:
     f.write(output_str)
 
-  inst_cycles = ['piri', 'geomungo', 'gayageum', 'ajaeng', 'haegeum', 'daegeum']
-  output_str = gen.cycle_inference_from_gen_code(txt_fn, inst_cycles=inst_cycles, num_cycles=6)
-  # txt_fn = 'gen_results/chwipunghyeong_bert_orchestration_gencode2.txt'
-
-  
-  
   jg_omr_str = gen.jg_to_omr_converter.convert_multi_inst_str(output_str)
-  notes, score = gen.jg_to_staff_converter(output_str, time_signature='30/8')
-
-  with open('gen_results/chwipunghyeong_bert_orchestration_omr4.txt', 'w') as f:
+  with open(out_dir / f'{name}_omr.txt', 'w') as f:
     f.write(jg_omr_str)
+
+  notes, score = gen.jg_to_staff_converter.convert_multi_track(output_str, time_signature='60/8')
+
+  txt_fn = out_dir / f'{name}_gen.txt'
+  output_str = gen.cycle_inference_from_gen_code(txt_fn, inst_cycles=inst_cycles, num_cycles=6)
+  with open(out_dir / f'{name}_cycle_gen.txt', 'w') as f:
+    f.write(output_str)
+
+  jg_omr_str_cycle = gen.jg_to_omr_converter.convert_multi_inst_str(output_str)
+  with open(out_dir / f'{name}_cycle_omr.txt', 'w') as f:
+    f.write(jg_omr_str_cycle)
   
-  score.write('musicxml', 'gen_results/chwipunghyeong_bert_orchestration_write3.musicxml')
+  cycle_notes, cycle_score = gen.jg_to_staff_converter.convert_multi_track(output_str, time_signature='60/8')
+  cycle_score.write('musicxml', out_dir / f'{name}_cycle.musicxml')
+  score.write('musicxml', out_dir / f'{name}.musicxml' )
   
   # score_fn = 'gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml'
   # output_str = gen.inference_from_xml(score_fn, ['geomungo', 'gayageum', 'ajaeng', 'haegeum', 'piri', 'daegeum'])

@@ -17,12 +17,12 @@ from sejong_music.loss import nll_loss, focal_loss
 from sejong_music.trainer import JeongganTrainer, BertTrainer
 from sejong_music.train_utils import CosineLRScheduler
 # from sejong_music.constants import PART, POSITION, PITCH
-from sejong_music.jg_code import JeongganDataset, JGMaskedDataset
+from sejong_music.jg_code import JeongganDataset, JGMaskedDataset, ABCDataset
 from sejong_music.full_inference import Generator
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
-  return f'{current_time_in_str}_{config.general.exp_name}_{config.dataset_class}_{config.model_class}'
+  return f'{current_time_in_str}_data={config.dataset_class}_depth={config.model.depth}_head={config.model.num_heads}_drop={config.model.dropout}_is_beat={config.data.use_offset}_pos_count={config.data.is_pos_counter}_{config.general.exp_name}_{config.model_class}'
 
 @hydra.main(config_path='yamls/', config_name='transformer_jeonggan')
 def main(config: DictConfig):
@@ -44,7 +44,7 @@ def main(config: DictConfig):
   if not save_dir.is_absolute():
     save_dir = original_wd / save_dir
   save_dir.mkdir(parents=True, exist_ok=True)
-  # dataset_class = JeongganDataset
+  dataset_class = getattr(jg_code, config.dataset_class)
   model_class = getattr(model_zoo, config.model_class)
   dataset_class:Union[JeongganDataset, JGMaskedDataset] = getattr(jg_code, config.dataset_class)
   trainer_class:Union[JeongganTrainer, BertTrainer] = getattr(trainer_zoo, config.trainer_class)
@@ -59,8 +59,11 @@ def main(config: DictConfig):
                   # max_meas=6,
                   # feature_types=['index', 'token', 'position'],
                   # target_instrument='daegeum'
+                  is_pos_counter=config.data.is_pos_counter,
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst
+                  num_max_inst = config.data.num_max_inst,
+                  use_offset=config.data.use_offset,
+                  is_summarize=config.data.summarize_position
                   )
   
   val_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
@@ -73,8 +76,11 @@ def main(config: DictConfig):
                   # feature_types=['index', 'token', 'position'],
                   # part_list = PART, position_token = POSITION, pitch_token = PITCH, 
                   # target_instrument=0,
+                  is_pos_counter=config.data.is_pos_counter,
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst
+                  num_max_inst = config.data.num_max_inst,
+                  use_offset=config.data.use_offset,
+                  is_summarize=config.data.summarize_position
                   )
     
   collate_fn = getattr(utils, config.collate_fn)
@@ -126,12 +132,18 @@ def main(config: DictConfig):
                                 device = device, 
                                 save_log=config.general.make_log, 
                                 save_dir=inst_save_dir, 
-                                scheduler=scheduler,
-                                min_epoch_for_infer=100)
+                                scheduler=scheduler, 
+                                use_fp16=(device=='cuda'),
+                                is_pos_counter = config.data.is_pos_counter,
+                                epoch_per_infer=20,
+                                min_epoch_for_infer=5,
+                                is_abc=dataset_class==ABCDataset, # 이거 확인!
+                                )
     generator = Generator(config=None,
                           model=model,
                           output_dir=inst_save_dir,
-                          inferencer=atrainer.inferencer
+                          inferencer=atrainer.inferencer, 
+                          is_abc = dataset_class==ABCDataset,
                           )
 
     atrainer.iteration = total_iteration

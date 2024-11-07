@@ -1,11 +1,12 @@
 from collections import Counter
 import numpy as np
+import torch
 from sejong_music.jg_code import JeongganPiece
 from sejong_music.constants import PITCH
 
 
 def per_jg_note_acc(pred, gt, inst, tokenizer, 
-                    num_frame_per_jg=6, strict=True, pitch_only=True):
+                    num_frame_per_jg=6, strict=True, pitch_only=False):
   '''
   Calculates per-jeonggan note accuracy.
 
@@ -22,19 +23,27 @@ def per_jg_note_acc(pred, gt, inst, tokenizer,
   Returns:
     Accuracy(float)
   '''
-  pred_roll = JeongganPiece.convert_tokens_to_roll(tokenizer.decode(pred),
+  if isinstance(pred, torch.Tensor):
+    pred = tokenizer.decode(pred)
+  if isinstance(gt, torch.Tensor):
+    gt = tokenizer.decode(gt)
+  
+  pred_roll = JeongganPiece.convert_tokens_to_roll(pred,
                                                    inst=inst,
                                                    num_frame_per_jg=num_frame_per_jg)
-  gt_roll = JeongganPiece.convert_tokens_to_roll(tokenizer.decode(gt),
+  gt_roll = JeongganPiece.convert_tokens_to_roll(gt,
                                                  inst=inst,
                                                  num_frame_per_jg=num_frame_per_jg)
   assert pred_roll.shape == gt_roll.shape, f"Length of pred and gt must be the same. {pred_roll.shape} != {gt_roll.shape}"
   
   if pitch_only:
     num_total = np.isin(gt_roll[:, 0], PITCH).sum()
+    num_pred_total = np.isin(pred_roll[:, 0], PITCH).sum()
   else:
     num_total = (gt_roll[:, 0] != '-').sum()
+    num_pred_total = (pred_roll[:, 0] != '-').sum()
   num_correct = 0
+  
   for i in range(0, pred_roll.shape[0], num_frame_per_jg):
     pred_chunk = pred_roll[i:i+num_frame_per_jg, 0]
     gt_chunk = gt_roll[i:i+num_frame_per_jg, 0]
@@ -48,12 +57,18 @@ def per_jg_note_acc(pred, gt, inst, tokenizer,
       for note in gt_chunk[mask]:
         if note in pred_chunk:
           num_correct += 1
+  
+  num_pred_total = max(num_pred_total, 1)
+  precision = num_correct / num_pred_total
+  recall = num_correct / num_total
+  
+  f1 = 2 * precision * recall / (precision + recall)
 
-  return num_correct / num_total
+  return f1
 
 
 def onset_f1(pred, gt, inst, tokenizer, 
-             num_frame_per_jg=6, pitch_only=True):
+             num_frame_per_jg=6, pitch_only=False):
   '''
   Calculates per-jeonggan onset f1.
   Ornamentations in note positions are also considered as onsets.
@@ -69,10 +84,15 @@ def onset_f1(pred, gt, inst, tokenizer,
   Returns:
     F1, Precision, Recall(float)
   '''
-  pred_roll = JeongganPiece.convert_tokens_to_roll(tokenizer.decode(pred),
+  if isinstance(pred, torch.Tensor):
+    pred = tokenizer.decode(pred)
+  if isinstance(gt, torch.Tensor):
+    gt = tokenizer.decode(gt)
+
+  pred_roll = JeongganPiece.convert_tokens_to_roll(pred,
                                                    inst=inst,
                                                    num_frame_per_jg=num_frame_per_jg)
-  gt_roll = JeongganPiece.convert_tokens_to_roll(tokenizer.decode(gt),
+  gt_roll = JeongganPiece.convert_tokens_to_roll(gt,
                                                  inst=inst,
                                                  num_frame_per_jg=num_frame_per_jg)
   assert pred_roll.shape == gt_roll.shape, f"Length of pred and gt must be the same. {pred_roll.shape} != {gt_roll.shape}"
