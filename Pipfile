@@ -4,11 +4,16 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-hydra = "*"
+torch = "==2.0.1"
 hydra-core = "*"
+wandb = "*"
+omegaconf = "*"
 music21 = "*"
+tqdm = "*"
 
 [dev-packages]
+ipykernel = "*"
 
 [requires]
 python_version = "3.8"
+python_full_version = "3.8.10"

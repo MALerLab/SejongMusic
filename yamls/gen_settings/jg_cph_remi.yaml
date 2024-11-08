@@ -1,0 +1,31 @@
+save_name: CPH_JG_TFM
+inst_state_dir: wandb/run-20240408_231102-rx8m1mtp/files/checkpoints
+# input_xml: gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml
+input_txt: music_score/chwipunghyeong_bert_gen.txt
+use_total_model: true
+output_dir: gen_results/
+use_offset: true
+
+class_names:
+  model: JeongganTransSeq2seq
+  inferencer: JGInferencer
+  tokenizer: JeongganTokenizer
+
+inst_codes: ['geomungo', 'gayageum', 'ajaen', 'haegeum', 'piri', 'daegeum']
+
+temperature: 0.9
+top_p: 0.9
+
+#   parser.add_argument('--save_name', type=str, default='CPH_Orch')
+# parser.add_argument('--gmg_state_dir', type=str, default='outputs/2024-03-08/23-02-48/wandb/run-20240308_230249-trfvg2ki/files/checkpoints')
+# parser.add_argument('--gyg_state_dir', type=str, default='outputs/2024-03-08/23-13-35/wandb/run-20240308_231336-b5coyy91/files/checkpoints')
+# parser.add_argument('--hg_state_dir', type=str, default='outputs/2024-03-08/20-14-57/wandb/run-20240308_201458-2hzc5z6j/files/checkpoints')
+# parser.add_argument('--pr_state_dir', type=str, default='outputs/2024-03-08/19-54-14/wandb/run-20240308_195415-nsoza2ld/files/checkpoints')
+# parser.add_argument('--dg_state_dir', type=str, default='outputs/2024-03-08/19-42-17/wandb/run-20240308_194218-kojvditr/files/checkpoints')
+# parser.add_argument('--inst_state_dir', type=str, default='wandb/run-20240401_110925-gfmcjxfa/files/checkpoints')
+# parser.add_argument('--input_xml', type=str, default='gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml')
+# # parser.add_argument('--state_path', type=str, default='outputs/2023-12-20/14-46-58/best_pitch_sim_model.pt')
+# # parser.add_argument('--state_alt_path', type=str, default='outputs/2023-12-20/14-46-58/best_loss_model.pt')
+# parser.add_argument('--config_path', type=str, default='yamls/baseline.yaml')
+# parser.add_argument('--output_dir', type=str, default='gen_results/')
+# parser.add_argument('--use_total_model', action='store_true')
