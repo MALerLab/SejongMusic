@@ -8,9 +8,8 @@ from tqdm.auto import tqdm
 from typing import List, Set, Dict, Tuple, Union
 
 from sejong_music import yeominrak_processing, model_zoo
-from sejong_music.yeominrak_processing import OrchestraScoreSeq, pack_collate
 from sejong_music.model_zoo import Seq2seq, QkvAttnSeq2seqOrch, get_emb_total_size, TransSeq2seq, JeongganTransSeq2seq
-from sejong_music.utils import convert_note_to_sampling, convert_onset_to_sustain_token, make_offset_set
+from sejong_music.utils import convert_note_to_sampling, convert_onset_to_sustain_token, make_offset_set, pack_collate
 from sejong_music.sampling_utils import nucleus
 from sejong_music.constants import get_dynamic_template_for_orch, get_dynamic, POSITION, DURATION, PITCH
 from sejong_music.jg_to_staff_converter import ABCtoGenConverter
