@@ -646,28 +646,13 @@ class JeongganTrainer(Trainer):
         print(f"Error occured in inference evaluation result: {e}")
         jg_note_acc, non_strict_acc = 0, 0
         f1, prec, recall = 0, 0, 0
-      # try:
-      #   note_dict, stream = self.decoder.convert_inference_result(output, src, self.model.tokenizer.decode(shifted_tgt))
-      #   if write_png:
-      #     stream.write('musicxml.png', fp=str(self.save_dir / f'{input_part_idx}-{target_part_idx}.png'))
-      #     if self.save_log:
-      #       wandb.log({f'inference_result_{idx}_from{input_part_idx}to{target_part_idx}': wandb.Image(str(self.save_dir / f'{input_part_idx}-{target_part_idx}-1.png'))},
-      #                 step=self.iteration)
-      # except Exception as e:
-      #   print(f"Error occured in inference result: {e}")
-      #   print(src)
-      #   print(output)
-      #   # print([note[2] for note in output])
-      #   is_match = False
+
       note_acc.append(jg_note_acc)
       note_none_strict.append(non_strict_acc)
       onset_f1_score.append(f1)
       onset_prec_score.append(prec)
       onset_recall_score.append(recall)
-      # if self.model.is_condition_shifted:
-      #   src, output, attn_map = self.model.shifted_inference(sample.to(self.device), target_part_idx)
-      # else:
-      #   src, output, attn_map = self.model.inference(sample.to(self.device), target_part_idx)
+
       '''
       input_measure_len, output_measure_len = MEAS_LEN_BY_IDX[input_part_idx], MEAS_LEN_BY_IDX[target_part_idx]
       try:
