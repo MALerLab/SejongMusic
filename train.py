@@ -52,20 +52,14 @@ def main(config: DictConfig):
   
   train_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
                   is_valid=False,
-                  is_pos_counter=config.data.is_pos_counter,
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst,
-                  use_offset=config.data.use_offset,
-                  is_summarize=config.data.summarize_position
+                  num_max_inst = config.data.num_max_inst
                   )
   
   val_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
                   is_valid=True,
-                  is_pos_counter=config.data.is_pos_counter,
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst,
-                  use_offset=config.data.use_offset,
-                  is_summarize=config.data.summarize_position
+                  num_max_inst = config.data.num_max_inst
                   )
     
   collate_fn = getattr(utils, config.collate_fn)
@@ -99,25 +93,19 @@ def main(config: DictConfig):
   
 
   # --- Training --- #
-  inst_save_dir = save_dir / f'inst_{target_inst_idx}'
   atrainer = trainer_class(model=model, 
-                              optimizer=optimizer, 
-                              loss_fn=loss_fn, 
-                              train_loader=train_loader, 
-                              valid_loader=valid_loader, 
-                              device = device, 
-                              save_log=config.general.make_log, 
-                              save_dir=inst_save_dir, 
-                              scheduler=scheduler, 
-                              use_fp16=(device=='cuda'),
-                              is_pos_counter = config.data.is_pos_counter,
-                              epoch_per_infer=20,
-                              min_epoch_for_infer=5,
-                              is_abc=dataset_class==ABCDataset, # 이거 확인!
-                              )
+                                optimizer=optimizer, 
+                                loss_fn=loss_fn, 
+                                train_loader=train_loader, 
+                                valid_loader=valid_loader, 
+                                device = device, 
+                                save_log=config.general.make_log, 
+                                save_dir=save_dir, 
+                                scheduler=scheduler,
+                                min_epoch_for_infer=100)
   generator = Generator(config=None,
                         model=model,
-                        output_dir=inst_save_dir,
+                        output_dir=save_dir,
                         inferencer=atrainer.inferencer, 
                         is_abc = dataset_class==ABCDataset,
                         )
@@ -127,16 +115,16 @@ def main(config: DictConfig):
 
 
   output_str = generator.inference_from_xml(original_wd / 'music_score/cph_generated.musicxml', ['geomungo', 'gayageum', 'ajaeng', 'haegeum', 'piri', 'daegeum'])
-  with open(inst_save_dir / 'cph_gencode.txt', 'w') as f:
+  with open(save_dir / 'cph_gencode.txt', 'w') as f:
     f.write(output_str)
   
   jg_render_str = generator.jg_to_omr_converter.convert_multi_inst_str(output_str)
-  with open(inst_save_dir / 'cph_jg_for_Render.txt', 'w') as f:
+  with open(save_dir / 'cph_jg_for_Render.txt', 'w') as f:
     f.write(jg_render_str)
   
   notes, score = generator.jg_to_staff_converter.convert_multi_track(output_str)
 
-  score.write('musicxml', inst_save_dir / 'cph_gen.musicxml')
+  score.write('musicxml', save_dir / 'cph_gen.musicxml')
   
   atrainer.make_inference_result(write_png=True)
 
