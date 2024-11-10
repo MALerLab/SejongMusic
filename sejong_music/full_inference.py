@@ -168,11 +168,11 @@ class Generator:
       inst_list = list(reversed(inst_cycles[1:]))
       target_inst = inst_cycles[0]
       print(inst_list, target_inst)
-      dataset = gen.prepare_dataset(gen_str, inst_list=inst_list) # reverse order
-      outputs_tensor = gen.make_full_inference_on_dataset(dataset, 
+      dataset = self.prepare_dataset(gen_str, inst_list=inst_list) # reverse order
+      outputs_tensor = self.make_full_inference_on_dataset(dataset, 
                                                             target_inst=target_inst, 
                                                             condition_instruments=inst_list)
-      gen_str = ' '.join(gen.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
+      gen_str = ' '.join(self.tokenizer.decode(outputs_tensor[:,0])) + ' \n\n ' + gen_str
       new_cycles = copy.copy(inst_cycles[1:]) + copy.copy([inst_cycles[0]])
       inst_cycles = new_cycles
     
