@@ -20,7 +20,7 @@ from .abc_utils import TokenList, PosToken
 
 
 class JeongganPiece:
-  def __init__(self, txt_fn, gen_str=None, inst_list=None, use_offset=False):
+  def __init__(self, txt_fn, gen_str=None, inst_list=None, use_offset=False, slice_len=4):
     self.use_offset = use_offset
     if gen_str:
       assert inst_list, "inst_list should be provided"
@@ -37,7 +37,7 @@ class JeongganPiece:
     # self.check_jeonggan_validity()
     self.tokenized_parts = [self.split_and_filter(part) for part in self.parts]
     self.token_counter = self.count_token()
-    self.sliced_parts_by_inst, self.sliced_parts_by_measure = self.prepare_sliced_measures()
+    self.sliced_parts_by_inst, self.sliced_parts_by_measure = self.prepare_sliced_measures(slice_len=slice_len)
     
   def split_to_inst(self):
     self.daegeum, self.piri, self.haegeum, self.ajaeng, self.gayageum, self.geomungo = None, None, None, None, None, None
@@ -247,8 +247,8 @@ class JeongganPiece:
       return txt
 
 class ABCPiece(JeongganPiece):
-  def __init__(self, txt_fn, gen_str=None, inst_list=None):
-    super().__init__(txt_fn, gen_str, inst_list)
+  def __init__(self, txt_fn, gen_str=None, inst_list=None, slice_len=4):
+    super().__init__(txt_fn, gen_str, inst_list, slice_len)
     self.processed_tokens = self.get_abc_notes()
     self.sliced_parts_by_inst, self.sliced_parts_by_measure = self.prepare_sliced_measure()
     
@@ -440,7 +440,7 @@ class JeongganDataset:
       self.all_pieces = piece_list
     else:
       texts = glob.glob(str(data_path / '*.txt'))
-      all_pieces = [JeongganPiece(text, use_offset=use_offset) for text in texts]
+      all_pieces = [JeongganPiece(text, use_offset=use_offset, slice_len=slice_measure_num) for text in texts]
       # all_pieces = [ABCPiece(text) for text in texts]
       self.all_pieces = [x for x in all_pieces if x.is_clean]
 
