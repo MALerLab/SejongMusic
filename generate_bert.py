@@ -5,7 +5,7 @@ from sejong_music.jg_code import JeongganPiece
 DEVICE = 'cuda'
 INPUT_FN = 'music_score/chwipunghyeong_gen.txt'
 TARGET_INST = 'piri'
-OUTPUT_FN = 'music_score/chwipunghyeong_bert_gen.txt'
+OUTPUT_FN = 'music_score/chwipunghyeong_bert_gen_test.txt'
 NUM_JG_PER_GAK = 10
 
 
@@ -63,5 +63,5 @@ if __name__ == "__main__":
   with open(OUTPUT_FN, 'w') as f:
     f.write(total_gen_str)
 
-  notes, score = self.gen2staff(total_gen_str, time_signatures=f'{NUM_JG_PER_GAK * 3}/8')
+  notes, score = self.gen2staff(total_gen_str, time_signature=f'{NUM_JG_PER_GAK * 3}/8')
   score.write('musicxml', 'cph_bert.musicxml')
