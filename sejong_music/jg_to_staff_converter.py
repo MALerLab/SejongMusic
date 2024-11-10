@@ -547,11 +547,17 @@ class JGToStaffConverter:
       
     pass
   
-  def convert_m21_notes_to_stream(self, notes:List[Note], time_signature='3/8', key_signature=-4):
+  def convert_m21_notes_to_stream(self, notes:List[Note], time_signature='3/8', key_signature=-4, num_jg_per_gak=None):
     stream = music21.stream.Stream()
-    stream.append(music21.meter.TimeSignature(time_signature))
+    if num_jg_per_gak is None:
+      num_jg_per_gak = [time_signature.split('/')[0] // 3] * len(notes)
+      stream.append(music21.meter.TimeSignature(time_signature))
+    else:
+      stream.append(music21.meter.TimeSignature(f"{num_jg_per_gak[0]*3}/8"))
     current_key = music21.key.KeySignature(key_signature)
     stream.append(current_key)
+    current_meas_duration = 0
+    current_meas_idx = 0
     for note in notes:
       for m21_note in note.m21_notes:
         if isinstance(m21_note, mnote.Note):
@@ -559,6 +565,14 @@ class JGToStaffConverter:
           if m21_note.pitch.accidental and m21_note.pitch.accidental.alter == 0:
             m21_note.pitch.accidental = None
         stream.append(m21_note)
+        current_meas_duration += m21_note.duration.quarterLength
+        if abs(current_meas_duration - num_jg_per_gak[current_meas_idx] * 1.5) < 0.01:
+          current_meas_duration = 0
+          current_meas_idx += 1
+          if current_meas_idx < len(num_jg_per_gak):
+            if num_jg_per_gak[current_meas_idx] != num_jg_per_gak[current_meas_idx-1]:
+              stream.append(music21.bar.Barline('regular'))
+              stream.append(music21.meter.TimeSignature(f"{num_jg_per_gak[current_meas_idx]*3}/8"))
     return stream
   
   def get_scale(self, notes:List[Note]):
@@ -598,9 +612,19 @@ class JGToStaffConverter:
     self._fix_three_col_division(notes)
     self.get_duration_of_notes(notes)
     self.create_m21_notes(notes, verbose=verbose)
-    stream = self.convert_m21_notes_to_stream(notes, time_signature=time_signature, key_signature=key_signature)
+    num_jg_per_gak = self.get_num_jg_per_gak(tokens)
+    stream = self.convert_m21_notes_to_stream(notes, time_signature=time_signature, key_signature=key_signature, num_jg_per_gak=num_jg_per_gak)
     return notes, stream
   
+  def get_num_jg_per_gak(self, tokens:List[str]) -> List[int]:
+    num_jg_per_gak = [1]
+    for token in tokens:
+      if token == '\n':
+        num_jg_per_gak.append(1)
+      elif token == '|':
+        num_jg_per_gak[-1] += 1
+    return num_jg_per_gak
+
   def convert_abc_tokens(self, tokens:List[str],
                          time_signatures:str='3/8', 
                          key_signature:int=-4,
