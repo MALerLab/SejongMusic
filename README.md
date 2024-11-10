@@ -2,10 +2,13 @@
 
 This is the official code repository for our ISMIR 2024 paper.
 
-The Court Music Orchestra of the National Gugak Center performed our generated Chihwapyeong and Chwipunghyeong on the birth anniversary of King Sejong at Gyeongbokgung Palace on May 14th, 2024. They performed it again at the National Gugak Center on June 2nd,2024. 
+The Court Music Orchestra of the National Gugak Center performed our generated Chihwapyeong and Chwipunghyeong on the birth anniversary of King Sejong at Gyeongbokgung Palace on May 14th, 2024. They performed it again at the National Gugak Center on June 2nd, 2024. 
 
-[Paper](https://arxiv.org/abs/2408.01096) \ 
-[PerformanceVideo](https://www.youtube.com/watch?v=7zS1FSG7dcg) (temporary)
+[Paper](https://arxiv.org/abs/2408.01096) 
+
+[Performance Video1](https://www.youtube.com/watch?v=7zS1FSG7dcg)
+
+[Performance Video2](https://youtu.be/LoU4hnCpcfA)
 
 ----
 
