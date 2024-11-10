@@ -1,4 +1,4 @@
-# Six dragons fly again: Reviving 15th-century korean court music with transformers and novel encoding (ISMIR 2024)
+# Six dragons fly again: Reviving 15th-century Korean court music with transformers and novel encoding (ISMIR 2024)
 
 This is the official code repository for our ISMIR 2024 paper.
 
@@ -6,6 +6,7 @@ The Court Music Orchestra of the National Gugak Center performed our generated C
 
 [Paper](https://arxiv.org/abs/2408.01096) 
 
+![Korean Court Music Ensemble](picture.jpg)
 [Performance Video1](https://www.youtube.com/watch?v=7zS1FSG7dcg)
 
 [Performance Video2](https://youtu.be/LoU4hnCpcfA)
