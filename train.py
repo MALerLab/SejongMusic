@@ -50,7 +50,8 @@ def main(config: DictConfig):
   trainer_class:Union[JeongganTrainer, BertTrainer] = getattr(trainer_zoo, config.trainer_class)
   
   
-  train_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
+  train_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code',
+                  slice_measure_num = config.data.slice_measure_num,
                   is_valid=False,
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst
@@ -87,7 +88,6 @@ def main(config: DictConfig):
   if config.general.make_log: 
     wandb.run.summary['num_model_parameters'] = num_model_parameters
   
-  model.is_condition_shifted = isinstance(train_dataset, yeominrak_processing.ShiftedAlignedScore)
   optimizer = torch.optim.Adam(model.parameters(), lr=config.train.lr)
   scheduler = CosineLRScheduler(optimizer, total_steps=config.train.num_epoch * len(train_loader), warmup_steps=1000, lr_min_ratio=0.001, cycle_length=1.0)
   
@@ -103,30 +103,17 @@ def main(config: DictConfig):
                                 save_dir=save_dir, 
                                 scheduler=scheduler,
                                 min_epoch_for_infer=100)
-  generator = Generator(config=None,
-                        model=model,
-                        output_dir=save_dir,
-                        inferencer=atrainer.inferencer, 
-                        is_abc = dataset_class==ABCDataset,
-                        )
+  # generator = Generator(config=None,
+  #                       model=model,
+  #                       output_dir=save_dir,
+  #                       inferencer=atrainer.inferencer, 
+  #                       is_abc = dataset_class==ABCDataset,
+  #                       )
 
   atrainer.train_by_num_iteration(config.train.num_epoch * len(train_loader))
   atrainer.load_best_model()
 
-
-  output_str = generator.inference_from_xml(original_wd / 'music_score/cph_generated.musicxml', ['geomungo', 'gayageum', 'ajaeng', 'haegeum', 'piri', 'daegeum'])
-  with open(save_dir / 'cph_gencode.txt', 'w') as f:
-    f.write(output_str)
-  
-  jg_render_str = generator.jg_to_omr_converter.convert_multi_inst_str(output_str)
-  with open(save_dir / 'cph_jg_for_Render.txt', 'w') as f:
-    f.write(jg_render_str)
-  
-  notes, score = generator.jg_to_staff_converter.convert_multi_track(output_str)
-
-  score.write('musicxml', save_dir / 'cph_gen.musicxml')
-  
-  atrainer.make_inference_result(write_png=True)
+  print(atrainer.make_inference_result())
 
 
 if __name__ == '__main__':
