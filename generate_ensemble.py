@@ -21,23 +21,32 @@ from sejong_music.full_inference import Generator
 
 
 
+def parse_args():
+  parser = argparse.ArgumentParser(description="Generate ensemble music")
+  parser.add_argument('--input_fn', type=str, default='gen_results/chwipunghyeong_infilled.txt', help='Input file name')
+  parser.add_argument('--output_fn', type=str, default='gen_results/chwipunghyeong_orchestration', help='Output file name')
+  parser.add_argument('--config_fn', type=str, default='yamls/gen_settings/jg_cph.yaml', help='Config file name')
+  return parser.parse_args()
+
+args = parse_args()
+INPUT_FN = args.input_fn
+OUTPUT_FN = args.output_fn
+CONFIG_FN = args.config_fn
+
+
 if __name__ == '__main__':
-  config = OmegaConf.load('yamls/gen_settings/jg_cph.yaml')
-  out_dir = Path('gen_results/')
+  config = OmegaConf.load(CONFIG_FN)
+  out_dir = Path(OUTPUT_FN)
   out_dir.mkdir(parents=True, exist_ok=True)
-  name = 'chihwapyeong_bert_orchestra_20beat_down_org'
+  name = Path(OUTPUT_FN).stem
   
-  # inst_cycles = ['piri', 'daegeum',  'haegeum', 'geomungo', 'gayageum', 'ajaeng']
   inst_cycles = ['piri', 'geomungo', 'gayageum', 'ajaeng', 'haegeum', 'daegeum']
 
   gen = Generator(config)
   gen.model.to('cuda')
-  # txt_fn = 'music_score/chwipunghyeong_bert_20beat_gen.txt'
-  # txt_fn = 'music_score/chwipunghyeong_bert_gen.txt'
-  # txt_fn = 'music_score/chihwapyeong_bert_20beat_gen.txt'
-  txt_fn = 'music_score/chihwapyeong_down_bert_20beat_gen.txt'
+
   
-  output_str = gen.inference_from_gen_code(txt_fn, inst_cycles)
+  output_str = gen.inference_from_gen_code(INPUT_FN, inst_cycles)
   with open(out_dir / f'{name}_gen.txt', 'w') as f:
     f.write(output_str)
 
