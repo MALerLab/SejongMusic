@@ -4,7 +4,7 @@ from sejong_music.jg_to_staff_converter import JGToStaffConverter
 # text_fn = 'gen_results/chwipunghyeong_bert_orchestration_gencode4.txt'
 
 if __name__ == "__main__":
-  txt_dir = Path('music_score/gen_code')
+  txt_dir = Path('music_score/jg_dataset')
   
 
   for txt_fn in txt_dir.glob('*.txt'):
