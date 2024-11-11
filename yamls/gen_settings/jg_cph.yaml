@@ -1,6 +1,6 @@
 save_name: CPH_JG_TFM
 # inst_state_dir: wandb/run-20240401_110925-gfmcjxfa/files/checkpoints
-inst_state_dir: models/transformer_large_checkpoints
+inst_state_dir: models/transformer_checkpoints
 # input_xml: gen_results/CHP_scoreCPH_from_1_0308-1209.musicxml
 use_total_model: true
 output_dir: gen_results/
