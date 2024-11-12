@@ -23,7 +23,7 @@ from sejong_music.full_inference import Generator
 
 def parse_args():
   parser = argparse.ArgumentParser(description="Generate ensemble music")
-  parser.add_argument('--input_fn', type=str, default='gen_results/chwipunghyeong_infilled.txt', help='Input file name')
+  parser.add_argument('--input_fn', type=str, default='music_score/chwipunghyeong_infilled.txt', help='Input file name')
   parser.add_argument('--output_fn', type=str, default='gen_results/chwipunghyeong_orchestration', help='Output file name')
   parser.add_argument('--config_fn', type=str, default='yamls/gen_settings/jg_cph.yaml', help='Config file name')
   return parser.parse_args()

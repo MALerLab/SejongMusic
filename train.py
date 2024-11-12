@@ -50,14 +50,14 @@ def main(config: DictConfig):
   trainer_class:Union[JeongganTrainer, BertTrainer] = getattr(trainer_zoo, config.trainer_class)
   
   
-  train_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code',
+  train_dataset = dataset_class(data_path= original_wd / 'music_score/jg_dataset',
                   slice_measure_num = config.data.slice_measure_num,
                   is_valid=False,
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst
                   )
   
-  val_dataset = dataset_class(data_path= original_wd / 'music_score/gen_code', 
+  val_dataset = dataset_class(data_path= original_wd / 'music_score/jg_dataset', 
                   is_valid=True,
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst

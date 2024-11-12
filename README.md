@@ -21,6 +21,12 @@ Jeongganbo was created by the King sejong in the 15th century and has been used 
 ## Interactive Web Demo
 You can generate Korean traditional orchestra music with your own melody through our interactive web [demo](https://www.six-dragons-fly-again.site/).
 
+
+----
+
+## Dataset
+The dataset created for this project is uploaded in `music_score/Jeongganbo_dataset.zip', which consists of 91 pieces of Jeongganbo music scores. 
+
 ----
 ## Requirements
 
@@ -42,7 +48,7 @@ pip install -r requirements.txt
 First, unzip the dataset using the code below.
 
 ```
-tar -xzvf music_score/gen_code.tar.gz -C music_score/
+unzip music_score/Jeongganbo_dataset.zip -d music_score/
 ```
 
 To train an Encoder-Decoder Transformer for generating orchestral parts, run the code below.
@@ -61,6 +67,13 @@ Since the training log is saved via `wandb`, `general.make_log` is set to False.
 
 ## Inference
 
+The pretrained model can be downloaded using `gdown` by running the code below.
+
+```
+gdown 18S-ET4ilZiDIm5xF_9xABg3Zlslek_vj
+unzip model_weights.zip
+```
+
 To infill the melody of a given melody, run the code below.
 
 ```
@@ -78,3 +91,16 @@ The generated music will be saved in the parent of `output_fn`. Six files will b
 - `output_fn_omr.txt`: The generated orchestration converted to encoding scheme of Jeongganbo OMR, which can be used for Jeongganbo notation rendering.
 - `output_fn_gen.musicxml`: The generated orchestration in MusicXML format.
 - `output_fn_cycle`: The result after the refinement process.
+
+----
+## Citation
+To cite our work, please use the following bibtex entry:
+
+```
+@inproceedings{sixdragons2024,
+  title={Six dragons fly again: Reviving 15th-century Korean court music with transformers and novel encoding},
+  author={Han, Danbinaerin and Gotham, Mark and Kim, Dongmin and Park, Hannah and Lee, Sihun and Jeong, Dasaem},
+  booktitle={Proceedings of 25th International Society for Music Information Retrieval Conference (ISMIR)},
+  year={2024}
+}
+```

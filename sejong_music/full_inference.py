@@ -47,9 +47,7 @@ class Generator:
     
   
   def _load_model(self):
-    # model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter72000_model.pt'
-    model_state_path = Path(self.config.inst_state_dir) / 'inst_0/iter34800_model.pt'
-    # model_state_path = Path(self.config.inst_state_dir) / 'inst_0/last_model.pt'
+    model_state_path = Path(self.config.inst_state_dir) / 'iter34800_model.pt'
     tokenizer_vocab_path = Path(self.config.inst_state_dir) / 'tokenizer_vocab.json'
     model_config_path = Path(self.config.inst_state_dir) / 'config.yaml'
     tokenizer:JeongganTokenizer = getattr(jg_code, self.config.class_names.tokenizer)(None, None, json_fn=tokenizer_vocab_path)

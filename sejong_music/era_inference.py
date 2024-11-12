@@ -50,7 +50,7 @@ class EraTransformer:
     state_dir = Path(state_dir)
     config_fn = state_dir / 'config.yaml'
     json_fn = state_dir / 'tokenizer_vocab.json'
-    ckpt_fn = state_dir / 'inst_0' / 'iter46400_model.pt'
+    ckpt_fn = state_dir / 'iter46400_model.pt'
 
     config = OmegaConf.load(config_fn)
     tokenizer = JeongganTokenizer(None, None, is_roll=True, json_fn=json_fn)
