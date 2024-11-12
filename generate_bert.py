@@ -7,9 +7,9 @@ import argparse
 def parse_args():
   parser = argparse.ArgumentParser(description="Generate music using BERT model")
   parser.add_argument('--device', type=str, default='cuda', help='Device to use for computation')
-  parser.add_argument('--input_fn', type=str, default='music_score/chwipunghyeong_gen.txt', help='Input file name')
+  parser.add_argument('--input_fn', type=str, default='music_score/chwipunghyeong_jg.txt', help='Input file name')
   parser.add_argument('--target_inst', type=str, default='piri', help='Target instrument. Select among ["piri", "daegeum", "haegeum", "geomungo", "gayageum", "ajaeng"]')
-  parser.add_argument('--output_fn', type=str, default='music_score/chwipunghyeong_bert_gen_test.txt', help='Output file name')
+  parser.add_argument('--output_fn', type=str, default='music_score/chwipunghyeong_infilled.txt', help='Output file name')
   parser.add_argument('--num_jg_per_gak', type=int, default=10, help='Number of Jeonggan per Gak. Select among [8, 10, 20]')
   return parser.parse_args()
 
@@ -78,4 +78,4 @@ if __name__ == "__main__":
     f.write(total_gen_str)
 
   notes, score = self.gen2staff(total_gen_str, time_signature=f'{NUM_JG_PER_GAK * 3}/8')
-  score.write('musicxml', 'cph_bert.musicxml')
+  score.write('musicxml', str(Path(OUTPUT_FN).with_suffix('.musicxml')))
