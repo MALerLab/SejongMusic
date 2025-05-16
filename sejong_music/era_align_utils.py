@@ -4,8 +4,8 @@ from sejong_music.tokenizer import SingleVocabTokenizer
 import torch.nn as nn
 import torch
 from torch.nn.utils.rnn import PackedSequence, pack_sequence
-from sejong_music.module import SumEmbeddingSingleVocab
-from sejong_music.yeominrak_processing import AlignedScore
+from .module import SumEmbeddingSingleVocab
+from .yeominrak_processing import AlignedScore
 
 
 class BeatPosConverter:

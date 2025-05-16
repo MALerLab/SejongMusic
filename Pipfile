@@ -5,11 +5,12 @@ name = "pypi"
 
 [packages]
 torch = "==2.0.1"
-hydra-core = "*"
-wandb = "*"
-omegaconf = "*"
-music21 = "*"
-tqdm = "*"
+hydra-core = "==1.3.2"
+wandb = "==0.18.6"
+omegaconf = "==2.3.0"
+music21 = "==8.3.0"
+tqdm = "==4.67.0"
+x-transformers = "==1.27.19"
 
 [dev-packages]
 ipykernel = "*"
