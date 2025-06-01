@@ -1,5 +1,5 @@
 general:
-  make_log: False
+  make_log: True
   debug: False
   exp_name: baseline
   entity: null
@@ -18,13 +18,13 @@ data:
   modification_ratio: 0.1
   slice_measure_num: 4
   is_pos_counter: True
-  num_max_inst: 4
+  num_max_inst: 6
   use_offset: False # True if you want to use REMI-like position encoding
   summarize_position: False # True if you want to use Octuple-like encoding for encoder tokens
 
 model:
-  dim: 64
-  depth: 10
+  dim: 128
+  depth: 6
   num_heads: 4
   dropout: 0.2
   is_pos_enc: False

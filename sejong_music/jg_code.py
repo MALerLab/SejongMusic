@@ -349,6 +349,7 @@ class JeongganTokenizer:
           self.vocab += [f'prev{x}' for x in pos_tokens] # add prev position token
         self.vocab += [f'jg:{i}' for i in range(20)] # add jg position
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
+        self.vocab += [f'jangdan:{i}' for i in [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20]] # add jangdan pattern
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
         self.vocab_size_dict = {'total': len(self.vocab)}
@@ -407,7 +408,7 @@ class JeongganDataset:
               # min_meas=3,
               # max_meas=6,
               jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'],
-              feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
+              feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'inst'],
               # target_instrument='daegeum',
               num_max_inst:int=5,
               augment_param=None,
@@ -434,7 +435,7 @@ class JeongganDataset:
     if self.is_pos_counter:
       self.feature_types = feature_types
     else:
-      self.feature_types = [feature_types[0]]+[feature_types[-1]]
+      self.feature_types = [x for x in feature_types if x not in ['in_jg_position', 'jg_offset', 'gak_offset']]
       
     if piece_list:
       self.all_pieces = piece_list
@@ -456,17 +457,13 @@ class JeongganDataset:
 
     self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
     
-    if self.is_pos_counter:
-      self.feature_types = feature_types
-    else:
-      self.feature_types = [feature_types[0]]+[feature_types[-1]]
     # self.target_instrument = target_instrument
     # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
 
     self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
 
   def _get_tokenizer(self, feature_types, tokenizer:JeongganTokenizer=None):
-    if tokenizer:
+    if tokenizer is not None:
       self.tokenizer = tokenizer
       self.vocab = tokenizer.vocab
     else:
@@ -477,7 +474,7 @@ class JeongganDataset:
   def __len__(self):
     return len(self.entire_segments)
   
-  def make_compound_word_in_order(self, token, inst, prev_position_token, current_jg_idx, current_gak_idx):
+  def make_compound_word_in_order(self, token, inst, prev_position_token, current_jg_idx, current_gak_idx, jangdan):
     new_token = []
     for feat in self.feature_types:
       if feat == 'token':
@@ -490,7 +487,14 @@ class JeongganDataset:
         new_token.append(f'jg:{current_jg_idx}')
       elif feat == 'gak_offset':
         new_token.append(f'gak:{current_gak_idx}')
+      elif feat == 'jangdan':
+        new_token.append(f'jangdan:{jangdan}')
     return new_token
+  
+  def get_jangdan_per_gak(self, tokens:List[str]):
+    str_per_gak = ' '.join(tokens).split(' \n ')
+    jangdan_per_gak = [len(x.split('|')) for x in str_per_gak]
+    return jangdan_per_gak
   
   def get_inst_and_position_feature(self, tokens:List[str], inst:str):
     new_tokens = []
@@ -498,9 +502,11 @@ class JeongganDataset:
     prev_position_token = '|'
     current_jg_idx = 0
     current_gak_idx = 0
+    jangdan_per_gak = self.get_jangdan_per_gak(tokens)
     for token in tokens:
       if self.is_pos_counter:
-        expanded_token = self.make_compound_word_in_order(token, inst, prev_position_token, current_jg_idx, current_gak_idx)
+        jangdan = jangdan_per_gak[current_gak_idx]
+        expanded_token = self.make_compound_word_in_order(token, inst, prev_position_token, current_jg_idx, current_gak_idx, jangdan)
         if token in self.position_tokens:
           prev_position_token = token 
         if token == '|':
@@ -532,7 +538,9 @@ class JeongganDataset:
       last_tokens = {'inst': note_list[0][self.feature_types.index('inst')],
                      'in_jg_position': 'prev\n', 
                      'jg_offset': 'jg:0',
-                      'gak_offset': f'gak:{int(note_list[-1][self.feature_types.index("gak_offset")][4:])+1}'}
+                      'gak_offset': f'gak:{int(note_list[-1][self.feature_types.index("gak_offset")][4:])+1}',
+                      'jangdan': f'jangdan:{int(note_list[-1][self.feature_types.index("jangdan")][8:])}'
+                      }
       for feature in self.feature_types:
         if feature == 'token': continue
         last_condition.append(last_tokens[feature])
@@ -689,11 +697,7 @@ class ABCDataset(JeongganDataset):
                      tokenizer=tokenizer, 
                      is_pos_counter=is_pos_counter,
                      is_summarize=is_summarize)
-    if self.is_pos_counter:
-      self.feature_types = feature_types
-    else:
-      self.feature_types = [feature_types[0]]+[feature_types[-1]]
-      
+
     if piece_list:
       self.all_pieces = piece_list
     else:

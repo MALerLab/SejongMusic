@@ -304,8 +304,8 @@ class JGInferencer(Inferencer):
     if self.use_offset:
       self.beat2gen = convert_beat_jg_to_gen
     
-  def get_start_token(self, inst:str):
-    return torch.LongTensor(self.tokenizer(['start', 'prev|', 'jg:0', 'gak:0', inst])).unsqueeze(0)
+  def get_start_token(self, inst:str, jangdan:int=10):
+    return torch.LongTensor(self.tokenizer(['start', 'prev|', 'jg:0', 'gak:0', f'jangdan:{jangdan}', inst])).unsqueeze(0)
   
   
   def encode_condition_token(self, prev_pos_token, current_jg_idx, current_gak_idx, inst_name):
@@ -331,13 +331,13 @@ class JGInferencer(Inferencer):
     return nucleus(prob, self.top_p) if self.top_p != 1.0 else prob.multinomial(num_samples=1)
   
   @torch.inference_mode()
-  def inference(self, src, inst_name:str, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
+  def inference(self, src, inst_name:str, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0), jangdan:int=10):
     dev = self.device
     src = src.to(dev)
         
     # Setup for 0th step
     # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
-    start_token = self.get_start_token(inst_name).to(dev)
+    start_token = self.get_start_token(inst_name, jangdan).to(dev)
     assert src.ndim == 2 # sequence length, feature length
     current_gak_idx = 0
     current_jg_idx = 0
@@ -408,10 +408,10 @@ class ABCInferencer(JGInferencer):
     super().__init__(model, is_condition_shifted, is_orch, temperature=temperature, top_p=top_p)
     self.jg_decoder = ABCtoGenConverter()
     
-  def get_start_token(self, inst:str):
-    return torch.LongTensor(self.tokenizer(['start', 'beat:0', 'jg:0', 'gak:0', inst])).unsqueeze(0)
+  def get_start_token(self, inst:str, jangdan:int=10):
+    return torch.LongTensor(self.tokenizer(['start', 'beat:0', 'jg:0', 'gak:0', f'jangdan:{jangdan}', inst])).unsqueeze(0)
   
-  def inference(self, src, inst_name:str, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
+  def inference(self, src, inst_name:str, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0), jangdan:int=10):
   
     dev = self.device
     src = src.to(dev)
@@ -420,7 +420,7 @@ class ABCInferencer(JGInferencer):
     
     # Setup for 0th step
     # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
-    start_token = self.get_start_token(inst_name).to(dev)
+    start_token = self.get_start_token(inst_name, jangdan).to(dev)
     assert src.ndim == 2 # sequence length, feature length
     current_gak_idx = 0
     current_jg_idx = 0
