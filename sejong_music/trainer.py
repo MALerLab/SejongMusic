@@ -19,10 +19,10 @@ from .jg_to_staff_converter import JGToStaffConverter
 from .eval_metrics import per_jg_note_acc, onset_f1
 
 
-us=environment.UserSettings()
-us['musescoreDirectPNGPath'] = '/usr/bin/mscore'
-os.putenv("QT_QPA_PLATFORM", "offscreen")
-os.putenv("XDG_RUNTIME_DIR", environment.Environment().getRootTempDir())
+# us=environment.UserSettings()
+# us['musescoreDirectPNGPath'] = '/usr/bin/mscore'
+# os.putenv("QT_QPA_PLATFORM", "offscreen")
+# os.putenv("XDG_RUNTIME_DIR", environment.Environment().getRootTempDir())
 
 
 
