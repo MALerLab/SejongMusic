@@ -402,12 +402,13 @@ class JeongganTokenizer:
 class JeongganDataset:
   def __init__(self, data_path= Path('music_score/gen_code'),
               slice_measure_num = 4,
-              is_valid=False,
+              split='train', # train, valid, test
               use_pitch_modification=False,
               pitch_modification_ratio=0.3,
               # min_meas=3,
               # max_meas=6,
               jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'],
+              jeonggan_test_set = ['보허자', '여창계면 계락', '취타 취타', '여창계면 이수대엽', '남창계면 계락', '여창반우반계 환계락'],
               feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'inst'],
               # target_instrument='daegeum',
               num_max_inst:int=5,
@@ -421,7 +422,7 @@ class JeongganDataset:
     
     data_path = Path(data_path)
     self.data_path = data_path
-    self.is_valid = is_valid
+    self.is_valid = split in ['valid', 'test']
     self.position_tokens = position_tokens
     self.is_pos_counter = is_pos_counter
     self.is_summarize = is_summarize
@@ -446,21 +447,19 @@ class JeongganDataset:
       self.all_pieces = [x for x in all_pieces if x.is_clean]
 
     self._get_tokenizer(feature_types, tokenizer)
-    self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
-    
-
-    # self.target_instrument = target_instrument
-    # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
-
-    self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
-
-
-    self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
+    if split == 'train':
+      exclude_pieces = jeonggan_valid_set + jeonggan_test_set
+      self.all_pieces = [piece for piece in self.all_pieces if piece.name not in exclude_pieces]
+    elif split == 'valid':
+      self.all_pieces = [piece for piece in self.all_pieces if piece.name in jeonggan_valid_set]
+    elif split == 'test':
+      self.all_pieces = [piece for piece in self.all_pieces if piece.name in jeonggan_test_set]
     
     # self.target_instrument = target_instrument
     # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
 
     self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
+
 
   def _get_tokenizer(self, feature_types, tokenizer:JeongganTokenizer=None):
     if tokenizer is not None:
