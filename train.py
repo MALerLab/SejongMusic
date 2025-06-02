@@ -52,13 +52,19 @@ def main(config: DictConfig):
   
   train_dataset = dataset_class(data_path= original_wd / 'music_score/jg_dataset',
                   slice_measure_num = config.data.slice_measure_num,
-                  is_valid=False,
+                  split='train',
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst
                   )
   
   val_dataset = dataset_class(data_path= original_wd / 'music_score/jg_dataset', 
-                  is_valid=True,
+                  split='valid',
+                  augment_param = config.aug,
+                  num_max_inst = config.data.num_max_inst
+                  )
+  
+  test_dataset = dataset_class(data_path= original_wd / 'music_score/jg_dataset', 
+                  split='test',
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst
                   )
@@ -71,8 +77,8 @@ def main(config: DictConfig):
                             shuffle=True, 
                             collate_fn=collate_fn,
                             num_workers=4)
-  valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=True)
-
+  valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=False)
+  test_loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False, collate_fn=collate_fn, drop_last=False)
   device = 'cuda'
 
   
@@ -93,7 +99,7 @@ def main(config: DictConfig):
   
 
   # --- Training --- #
-  atrainer = trainer_class(model=model, 
+  atrainer:JeongganTrainer = trainer_class(model=model, 
                                 optimizer=optimizer, 
                                 loss_fn=loss_fn, 
                                 train_loader=train_loader, 
@@ -112,8 +118,9 @@ def main(config: DictConfig):
 
   atrainer.train_by_num_iteration(config.train.num_epoch * len(train_loader))
   atrainer.load_best_model()
+  
 
-  print(atrainer.make_inference_result())
+  print(atrainer.make_inference_result(loader=test_loader))
 
 
 if __name__ == '__main__':
