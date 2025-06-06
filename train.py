@@ -60,21 +60,24 @@ def main(config: DictConfig):
                   split='train',
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
-                  feature_types = feature_types
+                  feature_types = feature_types,
+                  use_offset=config.data.use_offset
                   )
   
   val_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
                   split='valid',
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
-                  feature_types = feature_types
+                  feature_types = feature_types,
+                  use_offset=config.data.use_offset
                   )
   
   test_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
                   split='test',
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
-                  feature_types = feature_types
+                  feature_types = feature_types,
+                  use_offset=config.data.use_offset
                   )
     
   collate_fn = getattr(utils, config.collate_fn)
