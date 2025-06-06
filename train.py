@@ -49,24 +49,30 @@ def main(config: DictConfig):
   dataset_class:Union[JeongganDataset, JGMaskedDataset] = getattr(jg_code, config.dataset_class)
   trainer_class:Union[JeongganTrainer, BertTrainer] = getattr(trainer_zoo, config.trainer_class)
   
+  feature_types = ['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'inst']
+  if not config.data.use_jangdan:
+    feature_types.pop(feature_types.index('jangdan'))
   
-  train_dataset = dataset_class(data_path= original_wd / 'music_score/jg_dataset',
+  train_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned',
                   slice_measure_num = config.data.slice_measure_num,
                   split='train',
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst
+                  num_max_inst = config.data.num_max_inst,
+                  feature_types = feature_types
                   )
   
-  val_dataset = dataset_class(data_path= original_wd / 'music_score/jg_dataset', 
+  val_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
                   split='valid',
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst
+                  num_max_inst = config.data.num_max_inst,
+                  feature_types = feature_types
                   )
   
-  test_dataset = dataset_class(data_path= original_wd / 'music_score/jg_dataset', 
+  test_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
                   split='test',
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst
+                  num_max_inst = config.data.num_max_inst,
+                  feature_types = feature_types
                   )
     
   collate_fn = getattr(utils, config.collate_fn)
