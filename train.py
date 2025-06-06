@@ -114,6 +114,7 @@ def main(config: DictConfig):
                                 save_log=config.general.make_log, 
                                 save_dir=save_dir, 
                                 scheduler=scheduler,
+                                is_pos_counter='gak:0' in train_dataset.tokenizer.vocab,
                                 min_epoch_for_infer=100)
   # generator = Generator(config=None,
   #                       model=model,

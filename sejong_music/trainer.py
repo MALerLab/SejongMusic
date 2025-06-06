@@ -757,4 +757,4 @@ class BertTrainer(JeongganTrainer):
   
 
   def make_inference_result(self, write_png=True, loader=None):
-    return 0, 0, 0
+    return dict()
