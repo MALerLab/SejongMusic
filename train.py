@@ -49,9 +49,11 @@ def main(config: DictConfig):
   dataset_class:Union[JeongganDataset, JGMaskedDataset] = getattr(jg_code, config.dataset_class)
   trainer_class:Union[JeongganTrainer, BertTrainer] = getattr(trainer_zoo, config.trainer_class)
   
-  feature_types = ['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'inst']
+  feature_types = ['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'genre', 'inst']
   if not config.data.use_jangdan:
     feature_types.pop(feature_types.index('jangdan'))
+  if not config.data.use_genre:
+    feature_types.pop(feature_types.index('genre'))
   
   train_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned',
                   slice_measure_num = config.data.slice_measure_num,
@@ -125,7 +127,9 @@ def main(config: DictConfig):
 
   atrainer.train_by_num_iteration(config.train.num_epoch * len(train_loader))
   atrainer.load_best_model()
-  
+  # ckpt = torch.load(model_path / 'best_model.pt', map_location='cpu')
+  # model.load_state_dict(ckpt)
+  # model.eval()
 
   print(atrainer.make_inference_result(loader=test_loader))
 

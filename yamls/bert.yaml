@@ -22,6 +22,7 @@ data:
   slice_measure_num: 4
   num_max_inst: 1
   use_jangdan: False
+  use_genre: False
 model:
   dim: 128
   depth: 12

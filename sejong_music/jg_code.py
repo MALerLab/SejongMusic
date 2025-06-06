@@ -350,6 +350,8 @@ class JeongganTokenizer:
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
         if 'jangdan' in self.key_types:
           self.vocab += [f'jangdan:{i}' for i in [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20]] # add jangdan pattern
+        if 'genre' in self.key_types:
+          self.vocab += ['inst:4', 'inst:5', 'inst:6']
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
         self.vocab_size_dict = {'total': len(self.vocab)}
@@ -486,7 +488,7 @@ class JeongganDataset:
     # return len(self.entire_segments)
     return len(self.entire_segments_with_metadata)
   
-  def make_compound_word_in_order(self, token, inst, prev_position_token, current_jg_idx, current_gak_idx, jangdan):
+  def make_compound_word_in_order(self, token, inst, prev_position_token, current_jg_idx, current_gak_idx, jangdan, num_total_inst):
     new_token = []
     for feat in self.feature_types:
       if feat == 'token':
@@ -501,6 +503,8 @@ class JeongganDataset:
         new_token.append(f'gak:{current_gak_idx}')
       elif feat == 'jangdan':
         new_token.append(f'jangdan:{jangdan}')
+      elif feat == 'genre':
+        new_token.append(f'inst:{num_total_inst}')
     return new_token
   
   def get_jangdan_per_gak(self, tokens:List[str]):
@@ -508,7 +512,7 @@ class JeongganDataset:
     jangdan_per_gak = [len(x.split('|')) for x in str_per_gak]
     return jangdan_per_gak
   
-  def get_inst_and_position_feature(self, tokens:List[str], inst:str):
+  def get_inst_and_position_feature(self, tokens:List[str], inst:str, num_total_inst:int):
     new_tokens = []
     # hash_note = note_list[0][1] :0 :2
     prev_position_token = '|'
@@ -518,7 +522,7 @@ class JeongganDataset:
     for token in tokens:
       if self.is_pos_counter:
         jangdan = jangdan_per_gak[current_gak_idx]
-        expanded_token = self.make_compound_word_in_order(token, inst, prev_position_token, current_jg_idx, current_gak_idx, jangdan)
+        expanded_token = self.make_compound_word_in_order(token, inst, prev_position_token, current_jg_idx, current_gak_idx, jangdan, num_total_inst)
         if token in self.position_tokens:
           prev_position_token = token 
         if token == '|':
@@ -555,7 +559,8 @@ class JeongganDataset:
                       }
       if 'jangdan' in self.feature_types:
         last_tokens['jangdan'] = f'jangdan:{int(note_list[-1][self.feature_types.index("jangdan")][8:])}'
-      
+      if 'genre' in self.feature_types:
+        last_tokens['genre'] = f'inst:{int(note_list[-1][self.feature_types.index("genre")][5:])}'
       for feature in self.feature_types:
         if feature == 'token': continue
         last_condition.append(last_tokens[feature])
@@ -594,14 +599,15 @@ class JeongganDataset:
       
       original_source = {inst: segment_data_dict[inst] for inst in condition_insts}
       original_target = segment_data_dict[target_inst]
+      num_total_inst = len(segment_data_dict.keys())
 
-      expanded_source = [self.get_inst_and_position_feature(tokens, inst) for inst, tokens in original_source.items()]
+      expanded_source = [self.get_inst_and_position_feature(tokens, inst, num_total_inst) for inst, tokens in original_source.items()]
       expanded_source = [x for sublist in expanded_source for x in sublist]
 
       source = [source_start_token] + expanded_source + [source_end_token]
       if self.is_summarize:
         source = self.summarize_position_tokens(source)
-      target = self.get_inst_and_position_feature(original_target, target_inst)
+      target = self.get_inst_and_position_feature(original_target, target_inst, num_total_inst)
       if self.is_pos_counter:
         target = self.shift_condition(target)
       else:

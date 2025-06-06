@@ -22,6 +22,7 @@ data:
   use_offset: False # True if you want to use REMI-like position encoding
   summarize_position: False # True if you want to use Octuple-like encoding for encoder tokens
   use_jangdan: False # True if you want to use Jangdan-like encoding for encoder tokens
+  use_genre: False
 
 model:
   dim: 128
