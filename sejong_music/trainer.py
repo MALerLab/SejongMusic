@@ -523,7 +523,6 @@ class JeongganTrainer(Trainer):
                use_fp16=True, 
                epoch_per_infer=5,
                min_epoch_for_infer=5,
-               is_pos_counter=False, 
                is_abc=False):
 
     super().__init__(model, 
@@ -539,6 +538,7 @@ class JeongganTrainer(Trainer):
                      epoch_per_infer=epoch_per_infer,
                      min_epoch_for_infer=min_epoch_for_infer,
                      use_fp16=use_fp16)
+    is_pos_counter = 'gak:0' in self.train_loader.dataset.tokenizer.vocab
     if is_abc:
       self.inferencer = ABCInferencer(model, True, True, 1.0, 0.9)
     elif is_pos_counter:

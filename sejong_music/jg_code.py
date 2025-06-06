@@ -133,19 +133,30 @@ class JeongganPiece:
     return sliced_parts, sliced_by_measure
   
   @staticmethod
-  def convert_tokens_to_roll(tokens:List[str], inst:str, num_frame_per_jg=6, num_features=6)->np.ndarray:
+  def convert_tokens_to_roll(tokens:List[str], 
+                             inst:str, 
+                             num_frame_per_jg=6, 
+                             features=('pitch', 'sigimsae', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'genre', 'inst'),
+                             num_total_inst=6
+                             )->np.ndarray:
     notes:List[Note] = JGToStaffConverter.convert_to_notes(tokens)
     JGToStaffConverter.get_duration_of_notes(notes)
     num_jgs = sum([1 for x in tokens if x in ('|', '\n')])
-
+    num_features = len(features)
     outputs = np.zeros((num_jgs * num_frame_per_jg, num_features), dtype=object)
-    outputs[:, 2] = [f'beat:{i}' for i in range(6)] * num_jgs
-    outputs[:, 5] = inst
+    outputs[:, features.index('in_jg_position')] = [f'beat:{i}' for i in range(6)] * num_jgs
+    outputs[:, features.index('inst')] = inst
     num_jg_per_gak = JeongganPiece.get_measure_length(tokens)
     cur_idx = 0
     for i, num_jg in enumerate(num_jg_per_gak):
-      outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, 3] = [f'jg:{i}' for i in np.arange(num_jg).repeat(num_frame_per_jg)]
-      outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, 4] = f'gak:{i}'
+      if 'jg_offset' in features:
+        outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, features.index('jg_offset')] = [f'jg:{j}' for j in np.arange(num_jg).repeat(num_frame_per_jg)]
+      if 'gak_offset' in features:
+        outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, features.index('gak_offset')] = f'gak:{i}'
+      if 'jangdan' in features:
+        outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, features.index('jangdan')] = f'jangdan:{num_jg}'
+      if 'genre' in features:
+        outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, features.index('genre')] = f'inst:{num_total_inst}'
       cur_idx += num_jg*num_frame_per_jg
 
     for note in notes:
@@ -873,7 +884,8 @@ class JGMaskedDataset(JeongganDataset):
                augment_param:dict={},
                piece_list: List[JeongganPiece] = None, 
                tokenizer: JeongganTokenizer = None,
-               num_max_inst:int=6):
+               num_max_inst:int=6,
+               use_offset=False):
     super().__init__(data_path, slice_measure_num, split, False, False, jeonggan_valid_set=jeonggan_valid_set, jeonggan_test_set=jeonggan_test_set, feature_types=feature_types, position_tokens=position_tokens, piece_list=piece_list, tokenizer=tokenizer, num_max_inst=num_max_inst)
     self.entire_segments = self.get_entire_segments()
     self.unique_pitches, self.unique_ornaments = self._get_unique_pitch_and_ornaments()
@@ -907,11 +919,12 @@ class JGMaskedDataset(JeongganDataset):
     return entire_segments
   
   def _get_roll_by_part(self, sliced_parts_by_measure:List[Dict[str, List[str]]]):
-    return [{inst: JeongganPiece.convert_tokens_to_roll(tokens, inst) for inst, tokens in meas_data.items()} for meas_data in sliced_parts_by_measure]
+    num_total_inst = len(sliced_parts_by_measure[0].keys())
+    return [{inst: JeongganPiece.convert_tokens_to_roll(tokens, inst, features=self.feature_types, num_total_inst=num_total_inst) for inst, tokens in meas_data.items()} for meas_data in sliced_parts_by_measure]
 
   def prepare_special_tokens(self):
-    source_start_token = ['start'] * (len(self.feature_types) + 1)
-    source_end_token =  ['end'] * (len(self.feature_types) + 1)
+    source_start_token = ['start'] * len(self.feature_types)
+    source_end_token =  ['end'] * len(self.feature_types)
     return torch.LongTensor(self.tokenizer(source_start_token)), torch.LongTensor(self.tokenizer(source_end_token))
 
   def get_processed_feature(self, selected_insts: List[str], idx:int):

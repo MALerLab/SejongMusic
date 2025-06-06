@@ -54,6 +54,13 @@ def main(config: DictConfig):
     feature_types.pop(feature_types.index('jangdan'))
   if not config.data.use_genre:
     feature_types.pop(feature_types.index('genre'))
+  if not hasattr(config.data, 'use_offset'):
+    use_offset = False
+  else:
+    use_offset = config.data.use_offset
+  if config.dataset_class == "JGMaskedDataset":
+    feature_types.pop(feature_types.index('token'))
+    feature_types = ['pitch', 'sigimsae'] + feature_types
   
   train_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned',
                   slice_measure_num = config.data.slice_measure_num,
@@ -61,7 +68,7 @@ def main(config: DictConfig):
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
                   feature_types = feature_types,
-                  use_offset=config.data.use_offset
+                  use_offset=use_offset
                   )
   
   val_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
@@ -69,7 +76,7 @@ def main(config: DictConfig):
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
                   feature_types = feature_types,
-                  use_offset=config.data.use_offset
+                  use_offset=use_offset
                   )
   
   test_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
@@ -77,7 +84,7 @@ def main(config: DictConfig):
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
                   feature_types = feature_types,
-                  use_offset=config.data.use_offset
+                  use_offset=use_offset
                   )
     
   collate_fn = getattr(utils, config.collate_fn)
@@ -119,7 +126,6 @@ def main(config: DictConfig):
                                 save_log=config.general.make_log, 
                                 save_dir=save_dir, 
                                 scheduler=scheduler,
-                                is_pos_counter='gak:0' in train_dataset.tokenizer.vocab,
                                 min_epoch_for_infer=100)
   # generator = Generator(config=None,
   #                       model=model,
