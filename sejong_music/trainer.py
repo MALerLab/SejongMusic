@@ -603,13 +603,12 @@ class JeongganTrainer(Trainer):
       input_part_idx = sample[0][-1]
       target_part_idx = self.model.tokenizer.vocab[tgt[0][-1].item()]
       # if input_part_idx < 2: continue
-      src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
-      # try:
-      #   src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
-      # except Exception as e:
-      #   print(f"Error occured in inference result: {e}")
-      #   continue
-      #   # print([note[2] for note in output])
+      try:
+        src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
+      except Exception as e:
+        print(f"Error occured in inference result: {e}")
+        continue
+        # print([note[2] for note in output])
       if isinstance(self.inferencer, ABCInferencer):
         num_gen_jg = sum([1 for note in output if note[0] in ('|', '\n')])
         gen_converted_tgt = self.inferencer.jg_decoder(self.inferencer.tokenizer.decode(shifted_tgt)).split(' ')
@@ -626,23 +625,20 @@ class JeongganTrainer(Trainer):
           tgt_decoded = self.inferencer.tokenizer.decode(shifted_tgt)
           # tgt_decoded = [[token[0], token[-1]] for token in tgt_decoded]
           gen_str = self.inferencer.jg_decoder(tgt_decoded)
-          gen_tokens = gen_str.split(' ')
-          output_decoded = [x[0] for x in output]
-          jg_note_acc = per_jg_note_acc(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-          non_strict_acc = per_jg_note_acc(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
-          f1, prec, recall = onset_f1(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-
+          tgt_converted = gen_str.split(' ')
+          pred_converted = [x[0] for x in output]
         elif self.inferencer.use_offset:
           shifted_tgt = self.inferencer.beat2gen(self.inferencer.tokenizer.decode(shifted_tgt))
-          shifted_tgt = [x for x in shifted_tgt if x != '']
-          out_decoded = [x[0] for x in output]
-          jg_note_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-          non_strict_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
-          f1, prec, recall = onset_f1(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          tgt_converted = [x for x in shifted_tgt if x != '']
+          pred_converted = [x[0] for x in output]
         else:
-          jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-          non_strict_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
-          f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          pred_converted = output_tensor[:,0]
+          tgt_converted = shifted_tgt        
+        
+        jg_note_acc = per_jg_note_acc(pred_converted, tgt_converted, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+        non_strict_acc = per_jg_note_acc(pred_converted, tgt_converted, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
+        f1, prec, recall = onset_f1(pred_converted, tgt_converted, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+        
       except Exception as e:
         print(f"Error occured in inference evaluation result: {e}")
         jg_note_acc, non_strict_acc = 0, 0

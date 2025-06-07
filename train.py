@@ -95,8 +95,8 @@ def main(config: DictConfig):
                             shuffle=True, 
                             collate_fn=collate_fn,
                             num_workers=4)
-  valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=False)
-  test_loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False, collate_fn=collate_fn, drop_last=False)
+  valid_loader = DataLoader(val_dataset, batch_size=config.train.batch_size * 4, shuffle=False, collate_fn=collate_fn, drop_last=False)
+  test_loader = DataLoader(test_dataset, batch_size=config.train.batch_size * 4, shuffle=False, collate_fn=collate_fn, drop_last=False)
   device = 'cuda'
 
   

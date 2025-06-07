@@ -456,8 +456,7 @@ class JeongganDataset:
       self.all_pieces = piece_list
     else:
       texts = glob.glob(str(data_path / '*.txt'))
-      all_pieces = [JeongganPiece(text, use_offset=use_offset, slice_len=slice_measure_num) for text in texts]
-      # all_pieces = [ABCPiece(text) for text in texts]
+      all_pieces = self._create_pieces(texts, use_offset, slice_measure_num)
       self.all_pieces = [x for x in all_pieces if x.is_clean]
 
     self._get_tokenizer(feature_types, tokenizer)
@@ -467,12 +466,21 @@ class JeongganDataset:
     elif split == 'valid':
       self.all_pieces = [piece for piece in self.all_pieces if piece.name in jeonggan_valid_set]
     elif split == 'test':
+      jeonggan_test_set = [x for x in jeonggan_test_set if x != '보허자']
       self.all_pieces = [piece for piece in self.all_pieces if piece.name in jeonggan_test_set]
     
     # self.target_instrument = target_instrument
     # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
 
-    self.entire_segments_with_metadata = []
+    self.entire_segments_with_metadata = self._prepare_segments()
+    self.slice_measure_num = slice_measure_num # Store for later use in __getitem__
+
+
+  def _create_pieces(self, texts: List[str], use_offset: bool, slice_measure_num: int) -> List[JeongganPiece]:
+    return [JeongganPiece(text, use_offset=use_offset, slice_len=slice_measure_num) for text in texts]
+
+  def _prepare_segments(self):
+    entire_segments_with_metadata = []
     for piece in self.all_pieces:
         if piece.sliced_parts_by_measure: # Ensure the piece has slices
             for slice_idx, segment_data in enumerate(piece.sliced_parts_by_measure):
@@ -480,12 +488,22 @@ class JeongganDataset:
                 # piece.txt_fn is the filename
                 # piece.name is the piece name
                 # slice_idx is the index of this slice within this piece
-                self.entire_segments_with_metadata.append(
+                
+                if self.is_valid:
+                  insts_in_segment = list(segment_data.keys())
+                  target_candidates = random.sample(insts_in_segment, min(3, len(insts_in_segment)))
+                  for target_instrument in target_candidates:
+                    condition_instruments = [inst for inst in insts_in_segment if inst != target_instrument]
+                    condition_instruments = random.sample(condition_instruments, random.randint(1, min(len(condition_instruments), self.num_max_inst)))
+                    entire_segments_with_metadata.append(
+                        (segment_data, str(piece.txt_fn), piece.name, slice_idx, target_instrument, condition_instruments)
+                    )
+                else:
+                  entire_segments_with_metadata.append(
                     (segment_data, str(piece.txt_fn), piece.name, slice_idx) # Store txt_fn as str
                 )
-    self.slice_measure_num = slice_measure_num # Store for later use in __getitem__
-
-
+    return entire_segments_with_metadata
+    
   def _get_tokenizer(self, feature_types, tokenizer:JeongganTokenizer=None):
     if tokenizer is not None:
       self.tokenizer = tokenizer
@@ -601,7 +619,7 @@ class JeongganDataset:
       assert isinstance(condition_insts, list), "front_part_insts should be a list"
       
       # Retrieve the segment data and metadata using the main index
-      segment_data_dict, txt_fn, piece_name, slice_idx_in_piece = self.entire_segments_with_metadata[idx]
+      segment_data_dict= self.entire_segments_with_metadata[idx][0]
 
       if force_target_inst:
         source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(force_target_inst)
@@ -633,14 +651,27 @@ class JeongganDataset:
 
       return self.tokenizer(source), self.tokenizer(target), self.tokenizer(shifted_target)
 
+  def get_item_with_target_inst(self, idx, target_inst:str, condition_insts:List[str]=None):
+    assert target_inst in ('daegeum', 'piri', 'haegeum', 'ajaeng', 'gayageum', 'geomungo')
+    segment_data_dict = self.entire_segments_with_metadata[idx][0]
+
+    if condition_insts is None:
+      condition_insts = list(segment_data_dict.keys())
+      condition_insts.remove(target_inst)
+    src, tgt, shifted_tgt = self.get_processed_feature(condition_insts, target_inst, idx)   
+    return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
+
 
   def __getitem__(self, idx):
-    segment_data_dict, txt_fn, piece_name, slice_idx_in_piece = self.entire_segments_with_metadata[idx]
+    segment_data_dict = self.entire_segments_with_metadata[idx][0]
+    txt_fn = self.entire_segments_with_metadata[idx][1]
+    piece_name = self.entire_segments_with_metadata[idx][2]
+    slice_idx_in_piece = self.entire_segments_with_metadata[idx][3]
     insts_of_piece = list(segment_data_dict.keys())
 
     if self.is_valid:
-      target_instrument = insts_of_piece[0] if insts_of_piece else "None" # Fallback if insts_of_piece is empty
-      condition_instruments = insts_of_piece[1:] if len(insts_of_piece) > 1 else []
+      target_instrument = self.entire_segments_with_metadata[idx][4]
+      condition_instruments = self.entire_segments_with_metadata[idx][5]
     else:      
       target_instrument = random.choice(insts_of_piece)
       possible_condition_insts = [inst for inst in insts_of_piece if inst != target_instrument]
@@ -755,49 +786,18 @@ class ABCDataset(JeongganDataset):
                      piece_list=piece_list, 
                      tokenizer=tokenizer, 
                      is_pos_counter=is_pos_counter,
+                     augment_param=augment_param,
+                     num_max_inst=num_max_inst,
                      use_offset=False,
                      is_summarize=is_summarize)
-
-    if piece_list:
-      self.all_pieces = piece_list
-    else:
-      texts = glob.glob(str(data_path / '*.txt'))
-      # all_pieces = [JeongganPiece(text) for text in texts]
-      all_pieces = [ABCPiece(text) for text in texts]
-      self.all_pieces = [x for x in all_pieces if x.is_clean]
-
-    self._get_tokenizer(feature_types, tokenizer)
-    # self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
-    if split == 'train':
-      exclude_pieces = jeonggan_valid_set + jeonggan_test_set
-      self.all_pieces = [piece for piece in self.all_pieces if piece.name not in exclude_pieces]
-    elif split == 'valid':
-      self.all_pieces = [piece for piece in self.all_pieces if piece.name in jeonggan_valid_set]
-    elif split == 'test':
-      self.all_pieces = [piece for piece in self.all_pieces if piece.name in jeonggan_test_set]
-
-
-    self.entire_segments_with_metadata = []
-    for piece in self.all_pieces:
-        if piece.sliced_parts_by_measure: # Ensure the piece has slices
-            for slice_idx, segment_data in enumerate(piece.sliced_parts_by_measure):
-                # segment_data is a dict like {'daegeum': tokens, 'piri': tokens}
-                # piece.txt_fn is the filename
-                # piece.name is the piece name
-                # slice_idx is the index of this slice within this piece
-                self.entire_segments_with_metadata.append(
-                    (segment_data, str(piece.txt_fn), piece.name, slice_idx) # Store txt_fn as str
-                )
-    self.slice_measure_num = slice_measure_num # Store for later use in __getitem__
-
-
     
-    if self.is_pos_counter:
-      self.feature_types = feature_types
-    else:
-      self.feature_types = [feature_types[0]]+[feature_types[-1]]
+    # if not self.is_pos_counter:
+    #   self.feature_types = [feature_types[0]]+[feature_types[-1]]
 
+  def _create_pieces(self, texts: List[str], use_offset: bool, slice_measure_num: int) -> List[JeongganPiece]:
+    return [ABCPiece(text, slice_len=slice_measure_num) for text in texts]
   
+
   def _get_tokenizer(self, feature_types, tokenizer:JeongganTokenizer=None):
     if tokenizer:
       self.tokenizer = tokenizer
@@ -811,7 +811,7 @@ class ABCDataset(JeongganDataset):
       assert isinstance(condition_insts, list), "front_part_insts should be a list"
       
       source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(target_inst)
-      original_source = {inst: self.entire_segments_with_metadata[idx][0][inst] for inst in condition_insts if inst in self.entire_segments_with_metadata[idx][0]}
+      original_source = {inst: self.entire_segments_with_metadata[idx][0][inst] for inst in condition_insts}
       original_target = self.entire_segments_with_metadata[idx][0][target_inst]
       expanded_source = [token+[inst] for inst, tokens in original_source.items() for token in tokens]
       expanded_target = [token+[target_inst] for token in original_target]
@@ -849,12 +849,13 @@ class ABCDataset(JeongganDataset):
       return combined
     
   def __getitem__(self, idx):
-    segment_data_dict, txt_fn, piece_name, slice_idx_in_piece = self.entire_segments_with_metadata[idx]
+    segment_data_dict = self.entire_segments_with_metadata[idx][0]
+    
     insts_of_piece = list(segment_data_dict.keys())
 
     if self.is_valid:
-      target_instrument = insts_of_piece[0]
-      condition_instruments = insts_of_piece[1:]
+      target_instrument = self.entire_segments_with_metadata[idx][4]
+      condition_instruments = self.entire_segments_with_metadata[idx][5]
     else:
       target_instrument = random.choice(insts_of_piece)
       
@@ -865,19 +866,6 @@ class ABCDataset(JeongganDataset):
 
     src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)        
     
-    start_measure_abs = slice_idx_in_piece 
-    end_measure_abs = slice_idx_in_piece + self.slice_measure_num - 1
-    slice_info_str = f"Piece: {piece_name}, File: {txt_fn}, Slice Index (within piece): {slice_idx_in_piece} (Measures {start_measure_abs}-{end_measure_abs})"
-
-    metadata = {
-        'txt_fn': txt_fn,
-        'piece_name': piece_name,
-        'slice_idx_in_piece': slice_idx_in_piece, 
-        'slice_measure_num': self.slice_measure_num,
-        'slice_info_str': slice_info_str,
-        'target_inst': target_instrument,
-        'condition_insts': condition_instruments
-    }
     
     return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
 
