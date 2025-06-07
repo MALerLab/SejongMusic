@@ -941,6 +941,9 @@ class JGMaskedDataset(JeongganDataset):
     loss_mask = torch.cat([torch.zeros(1, 2), loss_mask, torch.zeros(1,2)])
     return x, correct_x, loss_mask
   
+  def __len__(self):
+    return len(self.entire_segments)
+
   def __getitem__(self, idx):
     insts_of_piece = list(self.entire_segments[idx].keys())
     if self.is_valid:
