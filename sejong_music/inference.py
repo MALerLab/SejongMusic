@@ -444,8 +444,10 @@ class ABCInferencer(JGInferencer):
     super().__init__(model, is_condition_shifted, is_orch, temperature=temperature, top_p=top_p)
     self.jg_decoder = ABCtoGenConverter()
     
-  def get_start_token(self, inst:str, jangdan:int=10):
-    return torch.LongTensor(self.tokenizer(['start', 'beat:0', 'jg:0', 'gak:0', f'jangdan:{jangdan}', inst])).unsqueeze(0)
+  def get_start_token(self, inst:str):
+    # currently only use beat:0, jg:0, gak:0, inst
+    return  torch.LongTensor(self.tokenizer(['start', 'beat:0', 'jg:0', 'gak:0', inst])).unsqueeze(0)
+    # return torch.LongTensor(self.tokenizer(['start', 'beat:0', 'jg:0', 'gak:0', f'jangdan:{jangdan}', inst])).unsqueeze(0)
   
   def inference(self, src, inst_name:str, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0), jangdan:int=10, num_total_inst:int=6):
   
@@ -456,7 +458,7 @@ class ABCInferencer(JGInferencer):
     
     # Setup for 0th step
     # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
-    start_token = self.get_start_token(inst_name, jangdan, num_total_inst).to(dev)
+    start_token = self.get_start_token(inst_name).to(dev)
     assert src.ndim == 2 # sequence length, feature length
     current_gak_idx = 0
     current_jg_idx = 0
@@ -564,10 +566,7 @@ class ABCInferencer(JGInferencer):
     return src_decoded, out_decoded, other_out
   
   def _split_by_inst_to_decode(self, tokens:List):
-    inst_list = []
-    for token in tokens:
-      if token[1] not in inst_list:
-        inst_list.append(token[1])
+    inst_list = list(set([token[1] for token in tokens]))
     all_tokens = []
     for inst in inst_list:
       inst_tokens = [token[0] for token in tokens if token[1] == inst]

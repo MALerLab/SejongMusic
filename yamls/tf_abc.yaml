@@ -1,0 +1,43 @@
+general:
+  make_log: True
+  debug: False
+  exp_name: baseline
+  entity: null
+  project: six-dragons-fly-again
+inference_dir: inference_img/
+
+dataset_class: ABCDataset
+model_class: JeongganTransSeq2seq
+loss_fn: nll_loss_transformer_with_logsoftmax
+collate_fn: pad_collate_transformer
+trainer_class: JeongganTrainer
+
+
+data:
+  use_pitch_modification: False
+  modification_ratio: 0.1
+  slice_measure_num: 4
+  is_pos_counter: True
+  num_max_inst: 6
+  use_offset: False # True if you want to use REMI-like position encoding
+  summarize_position: False # True if you want to use Octuple-like encoding for encoder tokens
+  use_jangdan: False # True if you want to use Jangdan-like encoding for encoder tokens
+  use_genre: False
+
+model:
+  dim: 128
+  depth: 6
+  num_heads: 4
+  dropout: 0.2
+  is_pos_enc: False
+
+train:
+  batch_size: 16
+  num_epoch: 300
+  seed: 42
+  num_workers: 4
+  lr: 1e-3
+
+aug: null
+
+

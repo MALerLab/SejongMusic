@@ -258,7 +258,7 @@ class JeongganPiece:
 
 class ABCPiece(JeongganPiece):
   def __init__(self, txt_fn, gen_str=None, inst_list=None, slice_len=4):
-    super().__init__(txt_fn, gen_str, inst_list, slice_len)
+    super().__init__(txt_fn, gen_str, inst_list, False, slice_len)
     self.processed_tokens = self.get_abc_notes()
     self.sliced_parts_by_inst, self.sliced_parts_by_measure = self.prepare_sliced_measure()
     
@@ -755,6 +755,7 @@ class ABCDataset(JeongganDataset):
                      piece_list=piece_list, 
                      tokenizer=tokenizer, 
                      is_pos_counter=is_pos_counter,
+                     use_offset=False,
                      is_summarize=is_summarize)
 
     if piece_list:
@@ -767,7 +768,14 @@ class ABCDataset(JeongganDataset):
 
     self._get_tokenizer(feature_types, tokenizer)
     # self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
-    
+    if split == 'train':
+      exclude_pieces = jeonggan_valid_set + jeonggan_test_set
+      self.all_pieces = [piece for piece in self.all_pieces if piece.name not in exclude_pieces]
+    elif split == 'valid':
+      self.all_pieces = [piece for piece in self.all_pieces if piece.name in jeonggan_valid_set]
+    elif split == 'test':
+      self.all_pieces = [piece for piece in self.all_pieces if piece.name in jeonggan_test_set]
+
 
     self.entire_segments_with_metadata = []
     for piece in self.all_pieces:
@@ -845,8 +853,8 @@ class ABCDataset(JeongganDataset):
     insts_of_piece = list(segment_data_dict.keys())
 
     if self.is_valid:
-      target_instrument = insts_of_piece[0] if insts_of_piece else "None" # Fallback if insts_of_piece is empty
-      condition_instruments = insts_of_piece[1:] if len(insts_of_piece) > 1 else []
+      target_instrument = insts_of_piece[0]
+      condition_instruments = insts_of_piece[1:]
     else:
       target_instrument = random.choice(insts_of_piece)
       

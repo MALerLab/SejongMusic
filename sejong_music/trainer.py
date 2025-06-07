@@ -603,12 +603,13 @@ class JeongganTrainer(Trainer):
       input_part_idx = sample[0][-1]
       target_part_idx = self.model.tokenizer.vocab[tgt[0][-1].item()]
       # if input_part_idx < 2: continue
-      try:
-        src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
-      except Exception as e:
-        print(f"Error occured in inference result: {e}")
-        continue
-        # print([note[2] for note in output])
+      src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
+      # try:
+      #   src, output, (attn, output_tensor, _) = self.inferencer.inference(sample.to(self.device), target_part_idx)
+      # except Exception as e:
+      #   print(f"Error occured in inference result: {e}")
+      #   continue
+      #   # print([note[2] for note in output])
       if isinstance(self.inferencer, ABCInferencer):
         num_gen_jg = sum([1 for note in output if note[0] in ('|', '\n')])
         gen_converted_tgt = self.inferencer.jg_decoder(self.inferencer.tokenizer.decode(shifted_tgt)).split(' ')
