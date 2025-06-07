@@ -436,7 +436,7 @@ class JeongganDataset:
     data_path = Path(data_path)
     self.data_path = data_path
     assert split in ['train', 'valid', 'test'], f"split should be train, valid, or test, but got {split}"
-    self.is_valid = split in ['valid', 'test']
+    self.is_valid = split == 'valid'
     self.position_tokens = position_tokens
     self.is_pos_counter = is_pos_counter
     self.is_summarize = is_summarize

@@ -19,6 +19,7 @@ from sejong_music.train_utils import CosineLRScheduler
 # from sejong_music.constants import PART, POSITION, PITCH
 from sejong_music.jg_code import JeongganDataset, JGMaskedDataset, ABCDataset
 from sejong_music.full_inference import Generator
+from sejong_music.evaluation import get_test_result
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
@@ -72,6 +73,7 @@ def main(config: DictConfig):
                   is_pos_counter=config.data.is_pos_counter
                   )
   
+  random.seed(42) # for reproducibility of validation random sampling
   val_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
                   split='valid',
                   augment_param = config.aug,
@@ -151,7 +153,16 @@ def main(config: DictConfig):
   # model.load_state_dict(ckpt)
   # model.eval()
 
-  print(atrainer.make_inference_result(loader=test_loader))
+  # print(atrainer.make_inference_result(loader=test_loader))
+  print("="*20)
+  output = get_test_result(model, atrainer.inferencer, test_dataset, 'daegeum', None)
+  print("Result for target instrument: daegeum / Condition instruments: All")
+  print(output)
+  print("="*20)
+  output = get_test_result(model, atrainer.inferencer, test_dataset, 'geomungo', ['piri'])
+  print("Result for target instrument: geomungo / Condition instruments: [piri]")
+  print(output)
+  
 
 
 if __name__ == '__main__':
