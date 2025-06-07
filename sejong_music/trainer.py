@@ -580,10 +580,10 @@ class JeongganTrainer(Trainer):
         
     return acc, acc, acc, validation_loss, num_tokens, loss_dict
   
-  def load_best_model(self):
-    self.model.load_state_dict(torch.load(self.save_dir/'best_model.pt'))
+  def load_best_model(self, model_code='best_model'):
+    self.model.load_state_dict(torch.load(self.save_dir/f'{model_code}.pt'))
     self.model.eval()
-    print('Best Model Loaded!')
+    print(f'Best Model Loaded!: {model_code}')
 
   def make_inference_result(self, write_png=False, loader=None):
     if loader is None:

@@ -97,4 +97,7 @@ def get_test_result(model, inferencer, test_dataset, target_inst='daegeum', cond
   
   return {'note_acc': note_acc, 
           'onset_f1': onset_f1_score, 
-          'onset_prec': onset_prec_score, 'onset_recall': onset_recall_score, 'jg_matched': jg_matched_score, 'note_none_strict': note_none_strict}
+          'onset_prec': onset_prec_score, 
+          'onset_recall': onset_recall_score, 
+          'jg_matched': jg_matched_score, 
+          'note_none_strict': note_none_strict}
