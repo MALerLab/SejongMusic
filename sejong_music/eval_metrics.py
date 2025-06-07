@@ -40,8 +40,8 @@ def per_jg_note_acc(pred, gt, inst, tokenizer,
     num_total = np.isin(gt_roll[:, 0], PITCH).sum()
     num_pred_total = np.isin(pred_roll[:, 0], PITCH).sum()
   else:
-    num_total = (gt_roll[:, 0] != '-').sum()
-    num_pred_total = (pred_roll[:, 0] != '-').sum()
+    num_total = ((gt_roll[:, 0] != '-') & (gt_roll[:, 0] != '비어있음')).sum()
+    num_pred_total = ((pred_roll[:, 0] != '-') & (pred_roll[:, 0] != '비어있음')).sum()
   num_correct = 0
   
   for i in range(0, pred_roll.shape[0], num_frame_per_jg):
@@ -50,7 +50,7 @@ def per_jg_note_acc(pred, gt, inst, tokenizer,
     if pitch_only:
       mask = np.isin(gt_chunk, PITCH)
     else:
-      mask = gt_chunk != '-'
+      mask = (gt_chunk != '-') & (gt_chunk != '비어있음')
     if strict:
       num_correct += (pred_chunk[mask] == gt_chunk[mask]).sum()
     else:
@@ -63,6 +63,8 @@ def per_jg_note_acc(pred, gt, inst, tokenizer,
   recall = num_correct / num_total
   
   f1 = 2 * precision * recall / (precision + recall)
+  if precision == 0 and recall == 0:
+    f1 = 0
 
   return f1
 

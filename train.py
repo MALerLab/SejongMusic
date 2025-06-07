@@ -68,7 +68,8 @@ def main(config: DictConfig):
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
                   feature_types = feature_types,
-                  use_offset=use_offset
+                  use_offset=use_offset,
+                  is_pos_counter=config.data.is_pos_counter
                   )
   
   val_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
@@ -76,7 +77,8 @@ def main(config: DictConfig):
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
                   feature_types = feature_types,
-                  use_offset=use_offset
+                  use_offset=use_offset,
+                  is_pos_counter=config.data.is_pos_counter
                   )
   
   test_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
@@ -84,7 +86,8 @@ def main(config: DictConfig):
                   augment_param = config.aug,
                   num_max_inst = config.data.num_max_inst,
                   feature_types = feature_types,
-                  use_offset=use_offset
+                  use_offset=use_offset,
+                  is_pos_counter=config.data.is_pos_counter
                   )
     
   collate_fn = getattr(utils, config.collate_fn)

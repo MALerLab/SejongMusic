@@ -491,8 +491,7 @@ class JeongganDataset:
                 
                 if self.is_valid:
                   insts_in_segment = list(segment_data.keys())
-                  target_candidates = random.sample(insts_in_segment, min(3, len(insts_in_segment)))
-                  for target_instrument in target_candidates:
+                  for target_instrument in insts_in_segment:
                     condition_instruments = [inst for inst in insts_in_segment if inst != target_instrument]
                     condition_instruments = random.sample(condition_instruments, random.randint(1, min(len(condition_instruments), self.num_max_inst)))
                     entire_segments_with_metadata.append(
@@ -822,6 +821,7 @@ class ABCDataset(JeongganDataset):
       if self.is_pos_counter:
         target = self.shift_condition(expanded_target)
       else:
+        source = [[x[0], x[-1]] for x in source]
         expanded_target = [[x[0], x[-1]] for x in   expanded_target]
         target = [target_start_token] + expanded_target + [target_end_token]
 

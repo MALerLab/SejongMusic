@@ -104,7 +104,7 @@ class Trainer:
       loss_value, train_loss_dict, attn_weight = self._train_by_single_batch(batch)
       self.training_loss.append(loss_value)
 
-      if iteration % 100 == 0:
+      if iteration % 300 == 0:
         self.model.eval()
         validation_loss, validation_acc, valid_loss_dict, valid_pitch_acc, valid_dur_acc = self.validate()
         self.pitch_acc.append(valid_pitch_acc)

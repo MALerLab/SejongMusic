@@ -33,7 +33,7 @@ train:
   batch_size: 16
   num_epoch: 400
   seed: 42
-  num_workers: 8
+  num_workers: 4
   lr: 0.001
 aug:
   entire_orn_r: 0.5
