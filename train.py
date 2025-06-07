@@ -116,18 +116,23 @@ def main(config: DictConfig):
   scheduler = CosineLRScheduler(optimizer, total_steps=config.train.num_epoch * len(train_loader), warmup_steps=1000, lr_min_ratio=0.001, cycle_length=1.0)
   
 
+  kargs = {
+    'model': model,
+    'optimizer': optimizer,
+    'loss_fn': loss_fn,
+    'train_loader': train_loader,
+    'valid_loader': valid_loader,
+    'device': device,
+    'save_log': config.general.make_log,
+    'save_dir': save_dir,
+    'scheduler': scheduler,
+    'min_epoch_for_infer': 100,
+    'is_abc': dataset_class==ABCDataset
+  }
+  if trainer_class == BertTrainer:
+    kargs.pop('is_abc')
   # --- Training --- #
-  atrainer:JeongganTrainer = trainer_class(model=model, 
-                                optimizer=optimizer, 
-                                loss_fn=loss_fn, 
-                                train_loader=train_loader, 
-                                valid_loader=valid_loader, 
-                                device = device, 
-                                save_log=config.general.make_log, 
-                                save_dir=save_dir, 
-                                scheduler=scheduler,
-                                min_epoch_for_infer=100,
-                                is_abc=dataset_class==ABCDataset)
+  atrainer:JeongganTrainer = trainer_class(**kargs)
   # generator = Generator(config=None,
   #                       model=model,
   #                       output_dir=save_dir,
@@ -135,13 +140,13 @@ def main(config: DictConfig):
   #                       is_abc = dataset_class==ABCDataset,
   #                       )
 
-  # atrainer.train_by_num_iteration(config.train.num_epoch * len(train_loader))
-  # atrainer.load_best_model()
+  atrainer.train_by_num_iteration(config.train.num_epoch * len(train_loader))
+  atrainer.load_best_model()
   
-  model_path = original_wd / 'wandb/run-20250607_025058-6udrzyjq/files/checkpoints'
-  ckpt = torch.load(model_path / 'best_model.pt', map_location='cpu')
-  model.load_state_dict(ckpt)
-  model.eval()
+  # model_path = original_wd / 'wandb/run-20250607_025058-6udrzyjq/files/checkpoints'
+  # ckpt = torch.load(model_path / 'best_model.pt', map_location='cpu')
+  # model.load_state_dict(ckpt)
+  # model.eval()
 
   print(atrainer.make_inference_result(loader=test_loader))
 
