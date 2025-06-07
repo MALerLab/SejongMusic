@@ -881,8 +881,9 @@ class JGMaskedDataset(JeongganDataset):
                piece_list: List[JeongganPiece] = None, 
                tokenizer: JeongganTokenizer = None,
                num_max_inst:int=6,
-               use_offset=False):
-    super().__init__(data_path, slice_measure_num, split, False, False, jeonggan_valid_set=jeonggan_valid_set, jeonggan_test_set=jeonggan_test_set, feature_types=feature_types, position_tokens=position_tokens, piece_list=piece_list, tokenizer=tokenizer, num_max_inst=num_max_inst)
+               use_offset=False,
+               is_pos_counter=True):
+    super().__init__(data_path, slice_measure_num, split, False, False, jeonggan_valid_set=jeonggan_valid_set, jeonggan_test_set=jeonggan_test_set, feature_types=feature_types, position_tokens=position_tokens, piece_list=piece_list, tokenizer=tokenizer, num_max_inst=num_max_inst, is_pos_counter=is_pos_counter)
     self.entire_segments = self.get_entire_segments()
     self.unique_pitches, self.unique_ornaments = self._get_unique_pitch_and_ornaments()
     self.augmentor = Augmentor(self.tokenizer, self.unique_pitches, self.unique_ornaments, **augment_param)

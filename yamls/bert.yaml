@@ -23,6 +23,7 @@ data:
   num_max_inst: 1
   use_jangdan: False
   use_genre: False
+  is_pos_counter: True
 model:
   dim: 128
   depth: 12
