@@ -2,6 +2,8 @@ from torch.nn.utils.rnn import pack_sequence, PackedSequence, pad_packed_sequenc
 from tqdm.auto import tqdm
 from .eval_metrics import per_jg_note_acc, onset_f1
 from .inference import ABCInferencer
+from .jg_code import JeongganDataset, ABCDataset
+from typing import Union
 
 def previous_fill_pitches(datas): # [pitch, is_onset]
   padded_data, lengths = pad_packed_sequence(datas, batch_first=True, padding_value=-1)
@@ -27,14 +29,19 @@ def fill_pitches(datas, sus_idx=0):
 
 
 
-def get_test_result(model, inferencer, test_dataset, target_inst='daegeum', condition_insts=None):
+def get_test_result(model, inferencer, test_dataset:Union[JeongganDataset, ABCDataset], target_inst='daegeum', condition_insts=None):
   note_acc = []
   note_none_strict = []
   onset_f1_score = []
   onset_prec_score = []
   onset_recall_score = []
   jg_matched = []
+  num_samples = 0
   for idx in tqdm(range(len(test_dataset))):
+    if target_inst not in list(test_dataset.entire_segments_with_metadata[idx][0].keys()):
+      print(f"Target instrument {target_inst} not found in the piece {test_dataset.entire_segments_with_metadata[idx][2]}")
+      continue
+    num_samples += 1
     sample, tgt, shifted_tgt = test_dataset.get_item_with_target_inst(idx, target_inst, condition_insts)
     input_part_idx = sample[0][-1]
     target_part_idx = model.tokenizer.vocab[tgt[0][-1].item()]
@@ -86,7 +93,6 @@ def get_test_result(model, inferencer, test_dataset, target_inst='daegeum', cond
     onset_prec_score.append(prec)
     onset_recall_score.append(recall)
     
-  num_samples = len(test_dataset)
   jg_matched_score = sum(jg_matched)/num_samples
   note_acc = sum(note_acc)/num_samples
   note_none_strict = sum(note_none_strict)/num_samples
