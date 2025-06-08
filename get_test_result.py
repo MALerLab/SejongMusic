@@ -21,9 +21,8 @@ def parse_args():
 def main():
   args = parse_args()
   model_path = Path(args.model_path)
-  # ckpt = torch.load(model_path / 'best_model.pt', map_location='cpu')
   # ckpt = torch.load(model_path / 'iter34800_model.pt', map_location='cpu')
-  ckpt = torch.load(model_path / 'last_model.pt', map_location='cpu')
+  # ckpt = torch.load(model_path / 'last_model.pt', map_location='cpu')
   config = OmegaConf.load(model_path / 'config.yaml')
   
   is_abc = config.dataset_class == 'ABCDataset'
@@ -41,9 +40,6 @@ def main():
   model_class = getattr(model_zoo, config.model_class)
 
   model = model_class(tokenizer, config.model)
-  model.load_state_dict(ckpt)
-  model.eval()
-  model.to('cuda')
 
   from torch.utils.data import DataLoader
 
@@ -73,11 +69,19 @@ def main():
                                )
   test_dataset.tokenizer = tokenizer  # ensure dataset uses the loaded tokenizer
 
+
   if is_abc:
     inferencer = ABCInferencer(model, use_offset, True, 1.0, 0.9)
   else:
     inferencer = JGInferencer(model, use_offset, True, 1.0, 0.9)
 
+
+  ckpt = torch.load(model_path / 'best_model.pt', map_location='cpu')
+  model.load_state_dict(ckpt)
+  model.eval()
+  model.to('cuda')
+  
+  print("Loaded Best Val Acc Model")
   output = get_test_result(model, inferencer, test_dataset, 'daegeum', None)
   print("Result for target instrument: daegeum / Condition instruments: All")
   print(output)
@@ -85,6 +89,37 @@ def main():
   output = get_test_result(model, inferencer, test_dataset, 'geomungo', ['piri'])
   print("Result for target instrument: geomungo / Condition instruments: [piri]")
   print(output)
+  
+  ckpt = torch.load(model_path / 'best_note_acc_model.pt', map_location='cpu')
+  model.load_state_dict(ckpt)
+  model.eval()
+  model.to('cuda')
+  
+  print("="*40)
+  print("Loaded Best Note Acc Model")
+  output = get_test_result(model, inferencer, test_dataset, 'daegeum', None)
+  print("Result for target instrument: daegeum / Condition instruments: All")
+  print(output)
+  
+  output = get_test_result(model, inferencer, test_dataset, 'geomungo', ['piri'])
+  print("Result for target instrument: geomungo / Condition instruments: [piri]")
+  print(output)
+  
+  print("="*40)
+  ckpt = torch.load(model_path / 'last_model.pt', map_location='cpu')
+  model.load_state_dict(ckpt)
+  model.eval()
+  model.to('cuda')
+  
+  print("Loaded Last Model")
+  output = get_test_result(model, inferencer, test_dataset, 'daegeum', None)
+  print("Result for target instrument: daegeum / Condition instruments: All")
+  print(output)
+  
+  output = get_test_result(model, inferencer, test_dataset, 'geomungo', ['piri'])
+  print("Result for target instrument: geomungo / Condition instruments: [piri]")
+  print(output)
+  
 
 if __name__ == '__main__':
   main()
