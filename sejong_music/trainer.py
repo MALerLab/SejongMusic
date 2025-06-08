@@ -38,8 +38,8 @@ class Trainer:
                save_log=True, 
                scheduler=None, 
                clip_grad_norm=1.0,
-               epoch_per_infer=5,
-               min_epoch_for_infer=5,
+               epoch_per_infer=20,
+               min_epoch_for_infer=100,
                use_fp16=False):
   # def __init__(self, **kwargs):
   #   for key, value in kwargs.items():

@@ -131,7 +131,7 @@ def main(config: DictConfig):
     'save_log': config.general.make_log,
     'save_dir': save_dir,
     'scheduler': scheduler,
-    'min_epoch_for_infer': 100,
+    'min_epoch_for_infer': 200,
     'is_abc': dataset_class==ABCDataset
   }
   if trainer_class == BertTrainer:
