@@ -66,7 +66,8 @@ def main():
                                augment_param=config.aug,
                                num_max_inst=config.data.num_max_inst,
                                feature_types=feature_types,
-                               use_offset=use_offset
+                               use_offset=use_offset,
+                               jeonggan_test_set=['평조회상 상현도드리', '자진한잎 수룡음 농']
                                )
   test_dataset.tokenizer = tokenizer  # ensure dataset uses the loaded tokenizer
 
