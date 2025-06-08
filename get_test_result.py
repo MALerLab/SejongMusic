@@ -122,6 +122,7 @@ def main():
   df['condition_instruments'] = 'piri'
   df['n_repeat'] = 10
   
+  df.to_csv(csv_path, mode='a', header=not csv_path.exists(), index=False)
 
 if __name__ == '__main__':
   main()
