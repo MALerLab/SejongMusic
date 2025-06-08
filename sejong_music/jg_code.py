@@ -420,8 +420,8 @@ class JeongganDataset:
               pitch_modification_ratio=0.3,
               # min_meas=3,
               # max_meas=6,
-              jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'],
-              jeonggan_test_set = ['보허자', '여창계면 계락', '취타 취타', '여창계면 이수대엽', '남창계면 계락', '여창반우반계 환계락'],
+              jeonggan_valid_set =['관악영산회상 염불도드리', '동동', '남창우조 중거', '여창계면 편수대엽', '자진한잎 수룡음 편2', '평조회상 가락덜이'],
+              jeonggan_test_set = ['관악영산회상 가락덜이', '취타 별우조타령', '여창우조 두거', '남창계면 언롱', '남창반우반계 편락', '평조회상 상현도드리', '자진한잎 수룡음 농', '보허자'],
               feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'inst'],
               # target_instrument='daegeum',
               num_max_inst:int=5,
@@ -619,6 +619,7 @@ class JeongganDataset:
       
       # Retrieve the segment data and metadata using the main index
       segment_data_dict= self.entire_segments_with_metadata[idx][0]
+      piece_name = self.entire_segments_with_metadata[idx][2]
 
       if force_target_inst:
         source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(force_target_inst)
@@ -628,6 +629,8 @@ class JeongganDataset:
       original_source = {inst: segment_data_dict[inst] for inst in condition_insts}
       original_target = segment_data_dict[target_inst]
       num_total_inst = len(segment_data_dict.keys())
+      if '남창' in piece_name or '여창' in piece_name:
+        num_total_inst = 5 # Sometimes geomungo is not included in the data, but actually it is included in the music
 
       expanded_source = [self.get_inst_and_position_feature(tokens, inst, num_total_inst) for inst, tokens in original_source.items()]
       expanded_source = [x for sublist in expanded_source for x in sublist]
@@ -761,8 +764,8 @@ class ABCDataset(JeongganDataset):
               pitch_modification_ratio=0.3,
               # min_meas=3,
               # max_meas=6,
-              jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'],
-              jeonggan_test_set = ['보허자', '여창계면 계락', '취타 취타', '여창계면 이수대엽', '남창계면 계락', '여창반우반계 환계락'],
+               jeonggan_valid_set =['관악영산회상 염불도드리', '동동', '남창우조 중거', '여창계면 편수대엽', '자진한잎 수룡음 편2', '평조회상 가락덜이'],
+               jeonggan_test_set = ['관악영산회상 가락덜이', '취타 별우조타령', '여창우조 두거', '남창계면 언롱', '남창반우반계 편락', '평조회상 상현도드리', '자진한잎 수룡음 농', '보허자'],
               feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'inst'],
               # target_instrument='daegeum',
               position_tokens=POSITION,
@@ -873,8 +876,8 @@ class JGMaskedDataset(JeongganDataset):
   def __init__(self, data_path='music_score/gen_code', 
                slice_measure_num=4, 
                split='train', 
-               jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'],
-               jeonggan_test_set = ['보허자', '여창계면 계락', '취타 취타', '여창계면 이수대엽', '남창계면 계락', '여창반우반계 환계락'],
+               jeonggan_valid_set =['관악영산회상 염불도드리', '동동', '남창우조 중거', '여창계면 편수대엽', '자진한잎 수룡음 편2', '평조회상 가락덜이'],
+               jeonggan_test_set = ['관악영산회상 가락덜이', '취타 별우조타령', '여창우조 두거', '남창계면 언롱', '남창반우반계 편락', '평조회상 상현도드리', '자진한잎 수룡음 농', '보허자'],
                feature_types=['token', 'ornaments', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'], 
                position_tokens=POSITION, 
                augment_param:dict={},
@@ -912,11 +915,15 @@ class JGMaskedDataset(JeongganDataset):
   def get_entire_segments(self):
     entire_segments = []
     for piece in tqdm(self.all_pieces, desc='Converting segments to roll...'):
-      entire_segments += self._get_roll_by_part(piece.sliced_parts_by_measure)
+      num_total_inst = len(piece.sliced_parts_by_measure[0].keys())
+      if '남창' in piece.name or '여창' in piece.name:
+        num_total_inst = 5 # Sometimes geomungo is not included in the data, but actually it is included in the music
+      entire_segments += self._get_roll_by_part(piece.sliced_parts_by_measure, num_total_inst)
     return entire_segments
   
-  def _get_roll_by_part(self, sliced_parts_by_measure:List[Dict[str, List[str]]]):
-    num_total_inst = len(sliced_parts_by_measure[0].keys())
+  def _get_roll_by_part(self, sliced_parts_by_measure:List[Dict[str, List[str]]], num_total_inst:int=None):
+    if num_total_inst is None:
+      num_total_inst = len(sliced_parts_by_measure[0].keys())
     return [{inst: JeongganPiece.convert_tokens_to_roll(tokens, inst, features=self.feature_types, num_total_inst=num_total_inst) for inst, tokens in meas_data.items()} for meas_data in sliced_parts_by_measure]
 
   def prepare_special_tokens(self):
