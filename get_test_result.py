@@ -1,8 +1,9 @@
 import argparse
 from pathlib import Path
 from omegaconf import OmegaConf
-
+import pandas as pd
 import torch
+import datetime
 
 from sejong_music import model_zoo, jg_code
 from sejong_music.jg_code import JeongganTokenizer, ABCTokenizer
@@ -76,49 +77,50 @@ def main():
     inferencer = JGInferencer(model, use_offset, True, 1.0, 0.9)
 
 
-  ckpt = torch.load(model_path / 'best_model.pt', map_location='cpu')
-  model.load_state_dict(ckpt)
-  model.eval()
-  model.to('cuda')
-  
-  print("Loaded Best Val Acc Model")
-  output = get_test_result(model, inferencer, test_dataset, 'daegeum', None)
-  print("Result for target instrument: daegeum / Condition instruments: All")
-  print(output)
-  
-  output = get_test_result(model, inferencer, test_dataset, 'geomungo', ['piri'])
-  print("Result for target instrument: geomungo / Condition instruments: [piri]")
-  print(output)
-  
   ckpt = torch.load(model_path / 'best_note_acc_model.pt', map_location='cpu')
   model.load_state_dict(ckpt)
   model.eval()
   model.to('cuda')
   
+  torch.manual_seed(42)
   print("="*40)
   print("Loaded Best Note Acc Model")
-  output = get_test_result(model, inferencer, test_dataset, 'daegeum', None)
+  output = get_test_result(model, inferencer, test_dataset, 'daegeum', None, n_repeat=10)
   print("Result for target instrument: daegeum / Condition instruments: All")
   print(output)
+
+  # Save to CSV
+  output_dir = Path('test_results')
+  output_dir.mkdir(parents=True, exist_ok=True)
+  # Convert output dictionary to DataFrame
+  df = pd.DataFrame([output])
   
-  output = get_test_result(model, inferencer, test_dataset, 'geomungo', ['piri'])
+  # Extract wandb run ID from model path
+  if str(model_path).split('/')[0] == 'wandb':
+    wandb_run_id = str(model_path).split('/')[1].split('-')[1]
+  else:
+    wandb_run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+  # Add metadata columns
+  df['wandb_run_id'] = wandb_run_id
+  df['model'] = 'best_note_acc_model'
+  df['target_instrument'] = 'daegeum'
+  df['condition_instruments'] = 'all'
+  df['n_repeat'] = 10
+
+  # Save to CSV
+  csv_path = output_dir / 'test_results.csv'
+  df.to_csv(csv_path, mode='a', header=not csv_path.exists(), index=False)
+  
+  output = get_test_result(model, inferencer, test_dataset, 'geomungo', ['piri'], n_repeat=10)
   print("Result for target instrument: geomungo / Condition instruments: [piri]")
   print(output)
-  
-  print("="*40)
-  ckpt = torch.load(model_path / 'last_model.pt', map_location='cpu')
-  model.load_state_dict(ckpt)
-  model.eval()
-  model.to('cuda')
-  
-  print("Loaded Last Model")
-  output = get_test_result(model, inferencer, test_dataset, 'daegeum', None)
-  print("Result for target instrument: daegeum / Condition instruments: All")
-  print(output)
-  
-  output = get_test_result(model, inferencer, test_dataset, 'geomungo', ['piri'])
-  print("Result for target instrument: geomungo / Condition instruments: [piri]")
-  print(output)
+  df = pd.DataFrame([output])
+  df['wandb_run_id'] = wandb_run_id
+  df['model'] = 'best_note_acc_model'
+  df['target_instrument'] = 'geomungo'
+  df['condition_instruments'] = 'piri'
+  df['n_repeat'] = 10
   
 
 if __name__ == '__main__':

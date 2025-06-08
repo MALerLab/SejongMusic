@@ -12,6 +12,7 @@ dependencies = [
     "music21==8.3.0",
     "tqdm==4.67.0",
     "x-transformers==1.27.19",
+    "pandas>=2.3.0",
 ]
 
 [dependency-groups]
