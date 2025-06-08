@@ -39,7 +39,7 @@ def get_test_result(model, inferencer, test_dataset:Union[JeongganDataset, ABCDa
   num_samples = 0
   for idx in tqdm(range(len(test_dataset))):
     if target_inst not in list(test_dataset.entire_segments_with_metadata[idx][0].keys()):
-      print(f"Target instrument {target_inst} not found in the piece {test_dataset.entire_segments_with_metadata[idx][2]}")
+      # print(f"Target instrument {target_inst} not found in the piece {test_dataset.entire_segments_with_metadata[idx][2]}")
       continue
     num_samples += 1
     sample, tgt, shifted_tgt = test_dataset.get_item_with_target_inst(idx, target_inst, condition_insts)
