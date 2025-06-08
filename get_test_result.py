@@ -97,7 +97,7 @@ def main():
   
   # Extract wandb run ID from model path
   if str(model_path).split('/')[0] == 'wandb':
-    wandb_run_id = str(model_path).split('/')[1].split('-')[1]
+    wandb_run_id = str(model_path).split('/')[1].split('-')[2]
   else:
     wandb_run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
 
