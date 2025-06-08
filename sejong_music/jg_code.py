@@ -360,7 +360,7 @@ class JeongganTokenizer:
         self.vocab += [f'jg:{i}' for i in range(20)] # add jg position
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
         if 'jangdan' in self.key_types:
-          self.vocab += [f'jangdan:{i}' for i in [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20]] # add jangdan pattern
+          self.vocab += [f'jangdan:{i}' for i in range(2, 21)] # add jangdan pattern
         if 'genre' in self.key_types:
           self.vocab += ['inst:4', 'inst:5', 'inst:6']
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
