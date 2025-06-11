@@ -138,42 +138,10 @@ def main(config: DictConfig):
     kargs.pop('is_abc')
   # --- Training --- #
   atrainer:JeongganTrainer = trainer_class(**kargs)
-  # generator = Generator(config=None,
-  #                       model=model,
-  #                       output_dir=save_dir,
-  #                       inferencer=atrainer.inferencer, 
-  #                       is_abc = dataset_class==ABCDataset,
-  #                       )
 
   atrainer.train_by_num_iteration(config.train.num_epoch * len(train_loader))
   
-  # model_path = original_wd / 'wandb/run-20250607_025058-6udrzyjq/files/checkpoints'
-  # ckpt = torch.load(model_path / 'best_model.pt', map_location='cpu')
-  # model.load_state_dict(ckpt)
-  # model.eval()
-
-  # print(atrainer.make_inference_result(loader=test_loader))
-  atrainer.load_best_model()
-  print("="*40)
-  output = get_test_result(model, atrainer.inferencer, test_dataset, 'daegeum', None)
-  print("Result for target instrument: daegeum / Condition instruments: All")
-  print(output)
-  print("="*40)
-  output = get_test_result(model, atrainer.inferencer, test_dataset, 'geomungo', ['piri'])
-  print("Result for target instrument: geomungo / Condition instruments: [piri]")
-  print(output)
-  
   atrainer.load_best_model('best_note_acc_model')
-  print("="*40)
-  output = get_test_result(model, atrainer.inferencer, test_dataset, 'daegeum', None)
-  print("Result for target instrument: daegeum / Condition instruments: All")
-  print(output)
-  print("="*40)
-  output = get_test_result(model, atrainer.inferencer, test_dataset, 'geomungo', ['piri'])
-  print("Result for target instrument: geomungo / Condition instruments: [piri]")
-  print(output)
-
-  atrainer.load_best_model('last_model')
   print("="*40)
   output = get_test_result(model, atrainer.inferencer, test_dataset, 'daegeum', None)
   print("Result for target instrument: daegeum / Condition instruments: All")
