@@ -34,6 +34,7 @@ We use ``uv`` for our virtual environments. To install the required packages, ru
 
 ```
 uv sync
+uv run python3 train.py
 ```
 
 If you are using other virtual environments, you can install the required packages by running the code below.
@@ -45,11 +46,7 @@ pip install -r requirements.txt
 
 ## Training
 
-First, unzip the dataset using the code below.
-
-```
-unzip music_score/Jeongganbo_dataset.zip -d music_score/
-```
+The training dataset is located in `music_score/jg_cleaned/`.
 
 To train an Encoder-Decoder Transformer for generating orchestral parts, run the code below.
 ```
