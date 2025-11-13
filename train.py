@@ -19,6 +19,7 @@ from sejong_music.train_utils import CosineLRScheduler
 # from sejong_music.constants import PART, POSITION, PITCH
 from sejong_music.jg_code import JeongganDataset, JGMaskedDataset, ABCDataset
 from sejong_music.full_inference import Generator
+from sejong_music.evaluation import get_test_result
 
 def make_experiment_name_with_date(config):
   current_time_in_str = datetime.datetime.now().strftime("%m%d-%H%M")
@@ -49,18 +50,46 @@ def main(config: DictConfig):
   dataset_class:Union[JeongganDataset, JGMaskedDataset] = getattr(jg_code, config.dataset_class)
   trainer_class:Union[JeongganTrainer, BertTrainer] = getattr(trainer_zoo, config.trainer_class)
   
+  feature_types = ['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'genre', 'inst']
+  if not config.data.use_jangdan:
+    feature_types.pop(feature_types.index('jangdan'))
+  if not config.data.use_genre:
+    feature_types.pop(feature_types.index('genre'))
+  if not hasattr(config.data, 'use_offset'):
+    use_offset = False
+  else:
+    use_offset = config.data.use_offset
+  if config.dataset_class == "JGMaskedDataset":
+    feature_types.pop(feature_types.index('token'))
+    feature_types = ['pitch', 'sigimsae'] + feature_types
   
-  train_dataset = dataset_class(data_path= original_wd / 'music_score/jg_dataset',
+  train_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned',
                   slice_measure_num = config.data.slice_measure_num,
-                  is_valid=False,
+                  split='train',
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst
+                  num_max_inst = config.data.num_max_inst,
+                  feature_types = feature_types,
+                  use_offset=use_offset,
+                  is_pos_counter=config.data.is_pos_counter
                   )
   
-  val_dataset = dataset_class(data_path= original_wd / 'music_score/jg_dataset', 
-                  is_valid=True,
+  random.seed(42) # for reproducibility of validation random sampling
+  val_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
+                  split='valid',
                   augment_param = config.aug,
-                  num_max_inst = config.data.num_max_inst
+                  num_max_inst = config.data.num_max_inst,
+                  feature_types = feature_types,
+                  use_offset=use_offset,
+                  is_pos_counter=config.data.is_pos_counter
+                  )
+  
+  test_dataset = dataset_class(data_path= original_wd / 'music_score/jg_cleaned', 
+                  split='test',
+                  augment_param = config.aug,
+                  num_max_inst = config.data.num_max_inst,
+                  feature_types = feature_types,
+                  use_offset=use_offset,
+                  is_pos_counter=config.data.is_pos_counter
                   )
     
   collate_fn = getattr(utils, config.collate_fn)
@@ -71,8 +100,8 @@ def main(config: DictConfig):
                             shuffle=True, 
                             collate_fn=collate_fn,
                             num_workers=4)
-  valid_loader = DataLoader(val_dataset, batch_size=len(val_dataset), shuffle=False, collate_fn=collate_fn, drop_last=True)
-
+  valid_loader = DataLoader(val_dataset, batch_size=config.train.batch_size * 4, shuffle=False, collate_fn=collate_fn, drop_last=False)
+  test_loader = DataLoader(test_dataset, batch_size=config.train.batch_size * 4, shuffle=False, collate_fn=collate_fn, drop_last=False)
   device = 'cuda'
 
   
@@ -92,29 +121,35 @@ def main(config: DictConfig):
   scheduler = CosineLRScheduler(optimizer, total_steps=config.train.num_epoch * len(train_loader), warmup_steps=1000, lr_min_ratio=0.001, cycle_length=1.0)
   
 
+  kargs = {
+    'model': model,
+    'optimizer': optimizer,
+    'loss_fn': loss_fn,
+    'train_loader': train_loader,
+    'valid_loader': valid_loader,
+    'device': device,
+    'save_log': config.general.make_log,
+    'save_dir': save_dir,
+    'scheduler': scheduler,
+    'min_epoch_for_infer': 200,
+    'is_abc': dataset_class==ABCDataset
+  }
+  if trainer_class == BertTrainer:
+    kargs.pop('is_abc')
   # --- Training --- #
-  atrainer = trainer_class(model=model, 
-                                optimizer=optimizer, 
-                                loss_fn=loss_fn, 
-                                train_loader=train_loader, 
-                                valid_loader=valid_loader, 
-                                device = device, 
-                                save_log=config.general.make_log, 
-                                save_dir=save_dir, 
-                                scheduler=scheduler,
-                                min_epoch_for_infer=100)
-  # generator = Generator(config=None,
-  #                       model=model,
-  #                       output_dir=save_dir,
-  #                       inferencer=atrainer.inferencer, 
-  #                       is_abc = dataset_class==ABCDataset,
-  #                       )
+  atrainer:JeongganTrainer = trainer_class(**kargs)
 
   atrainer.train_by_num_iteration(config.train.num_epoch * len(train_loader))
-  atrainer.load_best_model()
-
-  print(atrainer.make_inference_result())
-
+  
+  atrainer.load_best_model('best_note_acc_model')
+  print("="*40)
+  output = get_test_result(model, atrainer.inferencer, test_dataset, 'daegeum', None)
+  print("Result for target instrument: daegeum / Condition instruments: All")
+  print(output)
+  print("="*40)
+  output = get_test_result(model, atrainer.inferencer, test_dataset, 'geomungo', ['piri'])
+  print("Result for target instrument: geomungo / Condition instruments: [piri]")
+  print(output)
 
 if __name__ == '__main__':
   main()

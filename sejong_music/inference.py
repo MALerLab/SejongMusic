@@ -301,15 +301,30 @@ class JGInferencer(Inferencer):
                is_abc: bool = False):
     super().__init__(model, is_condition_shifted, is_orch, is_sep=False, temperature=temperature, top_p=top_p)
     self.use_offset = 'beat:0' in self.tokenizer.vocab
+    self.use_jangdan = 'jangdan:10' in self.tokenizer.vocab
+    self.use_genre = 'inst:4' in self.tokenizer.vocab
     if self.use_offset:
       self.beat2gen = convert_beat_jg_to_gen
     
-  def get_start_token(self, inst:str):
-    return torch.LongTensor(self.tokenizer(['start', 'prev|', 'jg:0', 'gak:0', inst])).unsqueeze(0)
+  def get_start_token(self, inst:str, jangdan:int=10, num_total_inst:int=6):
+    start_token = ['start', 'prev|', 'jg:0', 'gak:0']
+    if self.use_jangdan:
+      start_token.append(f'jangdan:{jangdan}')
+    if self.use_genre:
+      start_token.append(f'inst:{num_total_inst}')
+    
+    start_token.append(inst)
+    return torch.LongTensor(self.tokenizer(start_token)).unsqueeze(0)
   
   
-  def encode_condition_token(self, prev_pos_token, current_jg_idx, current_gak_idx, inst_name):
-    return self.tokenizer([f'prev{prev_pos_token}', f'jg:{current_jg_idx}', f'gak:{current_gak_idx}', inst_name])
+  def encode_condition_token(self, prev_pos_token, current_jg_idx, current_gak_idx, jangdan, num_total_inst, inst_name):
+    condition_tokens = [f'prev{prev_pos_token}', f'jg:{current_jg_idx}', f'gak:{current_gak_idx}']
+    if self.use_jangdan:
+      condition_tokens.append(f'jangdan:{jangdan}')
+    if self.use_genre:
+      condition_tokens.append(f'inst:{num_total_inst}')
+    condition_tokens.append(inst_name)
+    return self.tokenizer(condition_tokens)
     
   def _decode_inference_result(self, src, output, other_out):
     src_decoded = self.tokenizer.decode(src[1:-1])
@@ -330,6 +345,23 @@ class JGInferencer(Inferencer):
       prob = prob[:, 0]
     return nucleus(prob, self.top_p) if self.top_p != 1.0 else prob.multinomial(num_samples=1)
   
+  def _get_jangdan_per_gak(self, src):
+    if not self.use_jangdan:
+      return [10] * 100 # dummy value
+    decoded_src = self.tokenizer.decode(src[1:-1])
+    gak_jangdan_pairs = [tuple(x[3:5]) for x in decoded_src]
+    gak_jangdan_pairs = sorted(list(set(gak_jangdan_pairs)))
+    jangdan_per_gak = [int(pair[1].split(':')[1]) for pair in gak_jangdan_pairs]
+    return jangdan_per_gak + [jangdan_per_gak[-1]]
+  
+  def _get_num_total_inst(self, src):
+    if not self.use_genre:
+      return 6
+    decoded_src = self.tokenizer.decode(src[1])
+    inst_str = [x for x in decoded_src if x.startswith('inst:')][0]
+    num_inst = int(inst_str.split(':')[1])
+    return num_inst
+  
   @torch.inference_mode()
   def inference(self, src, inst_name:str, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
     dev = self.device
@@ -337,11 +369,14 @@ class JGInferencer(Inferencer):
         
     # Setup for 0th step
     # start_token = torch.LongTensor([[part_idx, 1, 1, 3, 3, 4]]) # start token idx is 1
-    start_token = self.get_start_token(inst_name).to(dev)
+    jangdan_per_gak = self._get_jangdan_per_gak(src)
+    num_total_inst = self._get_num_total_inst(src)
+    start_token = self.get_start_token(inst_name, jangdan_per_gak[0], num_total_inst).to(dev)
     assert src.ndim == 2 # sequence length, feature length
     current_gak_idx = 0
     current_jg_idx = 0
     prev_pos_token = '|'
+    current_jangdan = jangdan_per_gak[0]
     
     encoder_output: dict = self.model.run_encoder(src)
 
@@ -352,9 +387,9 @@ class JGInferencer(Inferencer):
 
     total_attention_weights = []
     # while True:
-    condition_tokens = self.encode_condition_token(prev_pos_token, current_jg_idx, current_gak_idx, inst_name)
+    condition_tokens = self.encode_condition_token(prev_pos_token, current_jg_idx, current_gak_idx, current_jangdan, num_total_inst, inst_name)
 
-    for i in range(2000):
+    for i in range(1000):
       input_token = torch.cat(final_tokens, dim=0) if isinstance(self.model, JeongganTransSeq2seq) else selected_token
       logit, encoder_output, attention_weight = self.model._run_inference_on_step(input_token, encoder_output)
       selected_token = self.sampling_process(logit)
@@ -375,7 +410,8 @@ class JGInferencer(Inferencer):
       if f'jg:{current_jg_idx}' not in self.tokenizer.vocab or f'gak:{current_gak_idx}' not in self.tokenizer.vocab:
         break
         
-      condition_tokens = self.encode_condition_token(prev_pos_token, current_jg_idx, current_gak_idx, inst_name)
+      current_jangdan = jangdan_per_gak[current_gak_idx]
+      condition_tokens = self.encode_condition_token(prev_pos_token, current_jg_idx, current_gak_idx, current_jangdan, num_total_inst, inst_name)
       
       # make new token for next rnn timestep
       selected_token = torch.cat([selected_token, torch.LongTensor([condition_tokens]).to(dev)], dim=1)
@@ -409,9 +445,11 @@ class ABCInferencer(JGInferencer):
     self.jg_decoder = ABCtoGenConverter()
     
   def get_start_token(self, inst:str):
-    return torch.LongTensor(self.tokenizer(['start', 'beat:0', 'jg:0', 'gak:0', inst])).unsqueeze(0)
+    # currently only use beat:0, jg:0, gak:0, inst
+    return  torch.LongTensor(self.tokenizer(['start', 'beat:0', 'jg:0', 'gak:0', inst])).unsqueeze(0)
+    # return torch.LongTensor(self.tokenizer(['start', 'beat:0', 'jg:0', 'gak:0', f'jangdan:{jangdan}', inst])).unsqueeze(0)
   
-  def inference(self, src, inst_name:str, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0)):
+  def inference(self, src, inst_name:str, prev_generation=None, fix_first_beat=False, compensate_beat=(0.0, 0.0), jangdan:int=10, num_total_inst:int=6):
   
     dev = self.device
     src = src.to(dev)
@@ -528,10 +566,7 @@ class ABCInferencer(JGInferencer):
     return src_decoded, out_decoded, other_out
   
   def _split_by_inst_to_decode(self, tokens:List):
-    inst_list = []
-    for token in tokens:
-      if token[1] not in inst_list:
-        inst_list.append(token[1])
+    inst_list = list(set([token[1] for token in tokens]))
     all_tokens = []
     for inst in inst_list:
       inst_tokens = [token[0] for token in tokens if token[1] == inst]

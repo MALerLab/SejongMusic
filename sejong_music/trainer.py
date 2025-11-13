@@ -19,10 +19,10 @@ from .jg_to_staff_converter import JGToStaffConverter
 from .eval_metrics import per_jg_note_acc, onset_f1
 
 
-us=environment.UserSettings()
-us['musescoreDirectPNGPath'] = '/usr/bin/mscore'
-os.putenv("QT_QPA_PLATFORM", "offscreen")
-os.putenv("XDG_RUNTIME_DIR", environment.Environment().getRootTempDir())
+# us=environment.UserSettings()
+# us['musescoreDirectPNGPath'] = '/usr/bin/mscore'
+# os.putenv("QT_QPA_PLATFORM", "offscreen")
+# os.putenv("XDG_RUNTIME_DIR", environment.Environment().getRootTempDir())
 
 
 
@@ -38,8 +38,8 @@ class Trainer:
                save_log=True, 
                scheduler=None, 
                clip_grad_norm=1.0,
-               epoch_per_infer=5,
-               min_epoch_for_infer=5,
+               epoch_per_infer=20,
+               min_epoch_for_infer=100,
                use_fp16=False):
   # def __init__(self, **kwargs):
   #   for key, value in kwargs.items():
@@ -104,7 +104,7 @@ class Trainer:
       loss_value, train_loss_dict, attn_weight = self._train_by_single_batch(batch)
       self.training_loss.append(loss_value)
 
-      if iteration % 100 == 0:
+      if iteration % 300 == 0:
         self.model.eval()
         validation_loss, validation_acc, valid_loss_dict, valid_pitch_acc, valid_dur_acc = self.validate()
         self.pitch_acc.append(valid_pitch_acc)
@@ -523,7 +523,6 @@ class JeongganTrainer(Trainer):
                use_fp16=True, 
                epoch_per_infer=5,
                min_epoch_for_infer=5,
-               is_pos_counter=False, 
                is_abc=False):
 
     super().__init__(model, 
@@ -539,6 +538,7 @@ class JeongganTrainer(Trainer):
                      epoch_per_infer=epoch_per_infer,
                      min_epoch_for_infer=min_epoch_for_infer,
                      use_fp16=use_fp16)
+    is_pos_counter = 'gak:0' in self.train_loader.dataset.tokenizer.vocab
     if is_abc:
       self.inferencer = ABCInferencer(model, True, True, 1.0, 0.9)
     elif is_pos_counter:
@@ -580,10 +580,10 @@ class JeongganTrainer(Trainer):
         
     return acc, acc, acc, validation_loss, num_tokens, loss_dict
   
-  def load_best_model(self):
-    self.model.load_state_dict(torch.load(self.save_dir/'best_model.pt'))
+  def load_best_model(self, model_code='best_model'):
+    self.model.load_state_dict(torch.load(self.save_dir/f'{model_code}.pt'))
     self.model.eval()
-    print('Best Model Loaded!')
+    print(f'Best Model Loaded!: {model_code}')
 
   def make_inference_result(self, write_png=False, loader=None):
     if loader is None:
@@ -625,23 +625,20 @@ class JeongganTrainer(Trainer):
           tgt_decoded = self.inferencer.tokenizer.decode(shifted_tgt)
           # tgt_decoded = [[token[0], token[-1]] for token in tgt_decoded]
           gen_str = self.inferencer.jg_decoder(tgt_decoded)
-          gen_tokens = gen_str.split(' ')
-          output_decoded = [x[0] for x in output]
-          jg_note_acc = per_jg_note_acc(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-          non_strict_acc = per_jg_note_acc(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
-          f1, prec, recall = onset_f1(output_decoded, gen_tokens, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-
+          tgt_converted = gen_str.split(' ')
+          pred_converted = [x[0] for x in output]
         elif self.inferencer.use_offset:
           shifted_tgt = self.inferencer.beat2gen(self.inferencer.tokenizer.decode(shifted_tgt))
-          shifted_tgt = [x for x in shifted_tgt if x != '']
-          out_decoded = [x[0] for x in output]
-          jg_note_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-          non_strict_acc = per_jg_note_acc(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
-          f1, prec, recall = onset_f1(out_decoded, shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          tgt_converted = [x for x in shifted_tgt if x != '']
+          pred_converted = [x[0] for x in output]
         else:
-          jg_note_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
-          non_strict_acc = per_jg_note_acc(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
-          f1, prec, recall = onset_f1(output_tensor[:,0], shifted_tgt, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+          pred_converted = output_tensor[:,0]
+          tgt_converted = shifted_tgt        
+        
+        jg_note_acc = per_jg_note_acc(pred_converted, tgt_converted, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+        non_strict_acc = per_jg_note_acc(pred_converted, tgt_converted, inst=target_part_idx, tokenizer=self.inferencer.tokenizer, strict=False)
+        f1, prec, recall = onset_f1(pred_converted, tgt_converted, inst=target_part_idx, tokenizer=self.inferencer.tokenizer)
+        
       except Exception as e:
         print(f"Error occured in inference evaluation result: {e}")
         jg_note_acc, non_strict_acc = 0, 0
@@ -757,4 +754,4 @@ class BertTrainer(JeongganTrainer):
   
 
   def make_inference_result(self, write_png=True, loader=None):
-    return 0, 0, 0
+    return dict()

@@ -537,7 +537,11 @@ class JGToStaffConverter:
               self.make_m21_note(note.midi_pitch, note.duration/3),
             ]
           elif orn in ('싸랭', '슬기둥1', '슬기둥2'):
-            grace_pitch = self.pitch_converter.pitch2midi['하배황']
+            if '하배황' in self.pitch_converter.pitch2midi:
+              grace_pitch = self.pitch_converter.pitch2midi['하배황']
+            else:
+              grace_pitch = 39
+              print(f"하배황 appeared in the scale {self.pitch_converter.scale}")
             note.m21_notes = [self.make_m21_note(grace_pitch, Fraction(1,3), grace=True)] + note.m21_notes
           else:
             if verbose: print(f"Unknown ornament {orn} in {note}")
@@ -550,7 +554,7 @@ class JGToStaffConverter:
   def convert_m21_notes_to_stream(self, notes:List[Note], time_signature='3/8', key_signature=-4, num_jg_per_gak=None):
     stream = music21.stream.Stream()
     if num_jg_per_gak is None:
-      num_jg_per_gak = [time_signature.split('/')[0] // 3] * len(notes)
+      num_jg_per_gak = [int(time_signature.split('/')[0]) // 3] * len(notes)
       stream.append(music21.meter.TimeSignature(time_signature))
     else:
       stream.append(music21.meter.TimeSignature(f"{num_jg_per_gak[0]*3}/8"))

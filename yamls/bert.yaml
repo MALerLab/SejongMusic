@@ -13,13 +13,17 @@ loss_fn: nll_loss_bert
 collate_fn: pad_collate_transformer
 trainer_class: BertTrainer
 data:
-  use_pitch_modification: true
-  modification_ratio: 0.3
-  min_meas: 4
-  max_meas: 4
-  sampling_rate: 2
-  target_instrument: 0
+  # use_pitch_modification: true
+  # modification_ratio: 0.3
+  # min_meas: 4
+  # max_meas: 4
+  # sampling_rate: 2
+  # target_instrument: 0
+  slice_measure_num: 4
   num_max_inst: 1
+  use_jangdan: False
+  use_genre: False
+  is_pos_counter: True
 model:
   dim: 128
   depth: 12
@@ -30,7 +34,7 @@ train:
   batch_size: 16
   num_epoch: 400
   seed: 42
-  num_workers: 8
+  num_workers: 4
   lr: 0.001
 aug:
   entire_orn_r: 0.5

@@ -53,3 +53,49 @@ def nll_loss_bert(pred, target, mask):
     losses.append(loss)
   losses = sum(losses) / 2
   return losses
+
+def get_per_token_nll_from_logits(logits, targets, pad_token_id=0):
+    """
+    Calculates per-token NLL loss from raw logits.
+
+    Args:
+        logits (torch.Tensor): Raw output from the model. 
+                               Shape: (batch_size, seq_len, vocab_size)
+        targets (torch.Tensor): Ground truth token IDs. 
+                                Shape: (batch_size, seq_len)
+        pad_token_id (int): ID of the padding token to ignore in loss.
+
+    Returns:
+        torch.Tensor: Per-token NLL losses. 
+                      Shape: (batch_size, seq_len)
+    """
+    batch_size, seq_len, vocab_size = logits.shape
+
+    # Apply log_softmax to convert logits to log-probabilities
+    log_probs = torch.log_softmax(logits, dim=-1)
+
+    # Flatten logits and targets to gather easily
+    # log_probs_flat: (batch_size * seq_len, vocab_size)
+    # targets_flat: (batch_size * seq_len)
+    log_probs_flat = log_probs.view(batch_size * seq_len, vocab_size)
+    targets_flat = targets.view(batch_size * seq_len)
+
+    # Gather the log-probabilities of the target tokens
+    # selected_log_probs: (batch_size * seq_len)
+    selected_log_probs = log_probs_flat[torch.arange(targets_flat.size(0)), targets_flat]
+
+    # NLL loss is the negative of these selected log-probabilities
+    # token_losses_flat: (batch_size * seq_len)
+    token_losses_flat = -selected_log_probs
+
+    # Create mask for padding tokens
+    # mask_flat: (batch_size * seq_len)
+    mask_flat = (targets_flat != pad_token_id).float()
+
+    # Apply mask (set loss to 0 for padding tokens)
+    masked_token_losses_flat = token_losses_flat * mask_flat
+
+    # Reshape back to (batch_size, seq_len)
+    per_token_losses = masked_token_losses_flat.view(batch_size, seq_len)
+
+    return per_token_losses

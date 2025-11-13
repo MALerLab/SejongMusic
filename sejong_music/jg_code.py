@@ -1,4 +1,3 @@
-
 import glob
 import random
 import json
@@ -134,19 +133,30 @@ class JeongganPiece:
     return sliced_parts, sliced_by_measure
   
   @staticmethod
-  def convert_tokens_to_roll(tokens:List[str], inst:str, num_frame_per_jg=6, num_features=6)->np.ndarray:
+  def convert_tokens_to_roll(tokens:List[str], 
+                             inst:str, 
+                             num_frame_per_jg=6, 
+                             features=('pitch', 'sigimsae', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'genre', 'inst'),
+                             num_total_inst=6
+                             )->np.ndarray:
     notes:List[Note] = JGToStaffConverter.convert_to_notes(tokens)
     JGToStaffConverter.get_duration_of_notes(notes)
     num_jgs = sum([1 for x in tokens if x in ('|', '\n')])
-
+    num_features = len(features)
     outputs = np.zeros((num_jgs * num_frame_per_jg, num_features), dtype=object)
-    outputs[:, 2] = [f'beat:{i}' for i in range(6)] * num_jgs
-    outputs[:, 5] = inst
+    outputs[:, features.index('in_jg_position')] = [f'beat:{i}' for i in range(6)] * num_jgs
+    outputs[:, features.index('inst')] = inst
     num_jg_per_gak = JeongganPiece.get_measure_length(tokens)
     cur_idx = 0
     for i, num_jg in enumerate(num_jg_per_gak):
-      outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, 3] = [f'jg:{i}' for i in np.arange(num_jg).repeat(num_frame_per_jg)]
-      outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, 4] = f'gak:{i}'
+      if 'jg_offset' in features:
+        outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, features.index('jg_offset')] = [f'jg:{j}' for j in np.arange(num_jg).repeat(num_frame_per_jg)]
+      if 'gak_offset' in features:
+        outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, features.index('gak_offset')] = f'gak:{i}'
+      if 'jangdan' in features:
+        outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, features.index('jangdan')] = f'jangdan:{num_jg}'
+      if 'genre' in features:
+        outputs[cur_idx:cur_idx+num_jg*num_frame_per_jg, features.index('genre')] = f'inst:{num_total_inst}'
       cur_idx += num_jg*num_frame_per_jg
 
     for note in notes:
@@ -248,7 +258,7 @@ class JeongganPiece:
 
 class ABCPiece(JeongganPiece):
   def __init__(self, txt_fn, gen_str=None, inst_list=None, slice_len=4):
-    super().__init__(txt_fn, gen_str, inst_list, slice_len)
+    super().__init__(txt_fn, gen_str, inst_list, False, slice_len)
     self.processed_tokens = self.get_abc_notes()
     self.sliced_parts_by_inst, self.sliced_parts_by_measure = self.prepare_sliced_measure()
     
@@ -349,6 +359,10 @@ class JeongganTokenizer:
           self.vocab += [f'prev{x}' for x in pos_tokens] # add prev position token
         self.vocab += [f'jg:{i}' for i in range(20)] # add jg position
         self.vocab += [f'gak:{i}' for i in range(10)] # add gak position
+        if 'jangdan' in self.key_types:
+          self.vocab += [f'jangdan:{i}' for i in range(2, 21)] # add jangdan pattern
+        if 'genre' in self.key_types:
+          self.vocab += ['inst:4', 'inst:5', 'inst:6']
         # sorted([tok for tok in list(set([note for inst in self.parts for measure in inst for note in measure])) if tok not in PITCH + position_token+ ['|']+['\n']])
         self.tok2idx = {value:i for i, value in enumerate(self.vocab) }  
         self.vocab_size_dict = {'total': len(self.vocab)}
@@ -401,13 +415,14 @@ class JeongganTokenizer:
 class JeongganDataset:
   def __init__(self, data_path= Path('music_score/gen_code'),
               slice_measure_num = 4,
-              is_valid=False,
+              split='train', # train, valid, test
               use_pitch_modification=False,
               pitch_modification_ratio=0.3,
               # min_meas=3,
               # max_meas=6,
-              jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'],
-              feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
+              jeonggan_valid_set =['관악영산회상 염불도드리', '동동', '남창우조 중거', '여창계면 편수대엽', '자진한잎 수룡음 편2', '평조회상 가락덜이'],
+              jeonggan_test_set = ['관악영산회상 가락덜이', '취타 별우조타령', '여창우조 두거', '남창계면 언롱', '남창반우반계 편락', '평조회상 상현도드리', '자진한잎 수룡음 농', '보허자'],
+              feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'inst'],
               # target_instrument='daegeum',
               num_max_inst:int=5,
               augment_param=None,
@@ -420,7 +435,8 @@ class JeongganDataset:
     
     data_path = Path(data_path)
     self.data_path = data_path
-    self.is_valid = is_valid
+    assert split in ['train', 'valid', 'test'], f"split should be train, valid, or test, but got {split}"
+    self.is_valid = split == 'valid'
     self.position_tokens = position_tokens
     self.is_pos_counter = is_pos_counter
     self.is_summarize = is_summarize
@@ -434,39 +450,61 @@ class JeongganDataset:
     if self.is_pos_counter:
       self.feature_types = feature_types
     else:
-      self.feature_types = [feature_types[0]]+[feature_types[-1]]
+      self.feature_types = [x for x in feature_types if x not in ['in_jg_position', 'jg_offset', 'gak_offset']]
       
     if piece_list:
       self.all_pieces = piece_list
     else:
       texts = glob.glob(str(data_path / '*.txt'))
-      all_pieces = [JeongganPiece(text, use_offset=use_offset, slice_len=slice_measure_num) for text in texts]
-      # all_pieces = [ABCPiece(text) for text in texts]
+      all_pieces = self._create_pieces(texts, use_offset, slice_measure_num)
       self.all_pieces = [x for x in all_pieces if x.is_clean]
 
     self._get_tokenizer(feature_types, tokenizer)
-    self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
+    if split == 'train':
+      exclude_pieces = jeonggan_valid_set + jeonggan_test_set
+      self.all_pieces = [piece for piece in self.all_pieces if piece.name not in exclude_pieces]
+    elif split == 'valid':
+      self.all_pieces = [piece for piece in self.all_pieces if piece.name in jeonggan_valid_set]
+    elif split == 'test':
+      jeonggan_test_set = [x for x in jeonggan_test_set if x != '보허자']
+      self.all_pieces = [piece for piece in self.all_pieces if piece.name in jeonggan_test_set]
     
-
     # self.target_instrument = target_instrument
     # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
 
-    self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
+    self.entire_segments_with_metadata = self._prepare_segments()
+    self.slice_measure_num = slice_measure_num # Store for later use in __getitem__
 
 
-    self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
+  def _create_pieces(self, texts: List[str], use_offset: bool, slice_measure_num: int) -> List[JeongganPiece]:
+    return [JeongganPiece(text, use_offset=use_offset, slice_len=slice_measure_num) for text in texts]
+
+  def _prepare_segments(self):
+    entire_segments_with_metadata = []
+    for piece in self.all_pieces:
+        if piece.sliced_parts_by_measure: # Ensure the piece has slices
+            for slice_idx, segment_data in enumerate(piece.sliced_parts_by_measure):
+                # segment_data is a dict like {'daegeum': tokens, 'piri': tokens}
+                # piece.txt_fn is the filename
+                # piece.name is the piece name
+                # slice_idx is the index of this slice within this piece
+                
+                if self.is_valid:
+                  insts_in_segment = list(segment_data.keys())
+                  for target_instrument in insts_in_segment:
+                    condition_instruments = [inst for inst in insts_in_segment if inst != target_instrument]
+                    condition_instruments = random.sample(condition_instruments, random.randint(1, min(len(condition_instruments), self.num_max_inst)))
+                    entire_segments_with_metadata.append(
+                        (segment_data, str(piece.txt_fn), piece.name, slice_idx, target_instrument, condition_instruments)
+                    )
+                else:
+                  entire_segments_with_metadata.append(
+                    (segment_data, str(piece.txt_fn), piece.name, slice_idx) # Store txt_fn as str
+                )
+    return entire_segments_with_metadata
     
-    if self.is_pos_counter:
-      self.feature_types = feature_types
-    else:
-      self.feature_types = [feature_types[0]]+[feature_types[-1]]
-    # self.target_instrument = target_instrument
-    # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
-
-    self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
-
   def _get_tokenizer(self, feature_types, tokenizer:JeongganTokenizer=None):
-    if tokenizer:
+    if tokenizer is not None:
       self.tokenizer = tokenizer
       self.vocab = tokenizer.vocab
     else:
@@ -475,9 +513,10 @@ class JeongganDataset:
       self.vocab = self.tokenizer.vocab
 
   def __len__(self):
-    return len(self.entire_segments)
+    # return len(self.entire_segments)
+    return len(self.entire_segments_with_metadata)
   
-  def make_compound_word_in_order(self, token, inst, prev_position_token, current_jg_idx, current_gak_idx):
+  def make_compound_word_in_order(self, token, inst, prev_position_token, current_jg_idx, current_gak_idx, jangdan, num_total_inst):
     new_token = []
     for feat in self.feature_types:
       if feat == 'token':
@@ -490,17 +529,28 @@ class JeongganDataset:
         new_token.append(f'jg:{current_jg_idx}')
       elif feat == 'gak_offset':
         new_token.append(f'gak:{current_gak_idx}')
+      elif feat == 'jangdan':
+        new_token.append(f'jangdan:{jangdan}')
+      elif feat == 'genre':
+        new_token.append(f'inst:{num_total_inst}')
     return new_token
   
-  def get_inst_and_position_feature(self, tokens:List[str], inst:str):
+  def get_jangdan_per_gak(self, tokens:List[str]):
+    str_per_gak = ' '.join(tokens).split(' \n ')
+    jangdan_per_gak = [len(x.split('|')) for x in str_per_gak]
+    return jangdan_per_gak
+  
+  def get_inst_and_position_feature(self, tokens:List[str], inst:str, num_total_inst:int):
     new_tokens = []
     # hash_note = note_list[0][1] :0 :2
     prev_position_token = '|'
     current_jg_idx = 0
     current_gak_idx = 0
+    jangdan_per_gak = self.get_jangdan_per_gak(tokens)
     for token in tokens:
       if self.is_pos_counter:
-        expanded_token = self.make_compound_word_in_order(token, inst, prev_position_token, current_jg_idx, current_gak_idx)
+        jangdan = jangdan_per_gak[current_gak_idx]
+        expanded_token = self.make_compound_word_in_order(token, inst, prev_position_token, current_jg_idx, current_gak_idx, jangdan, num_total_inst)
         if token in self.position_tokens:
           prev_position_token = token 
         if token == '|':
@@ -532,7 +582,13 @@ class JeongganDataset:
       last_tokens = {'inst': note_list[0][self.feature_types.index('inst')],
                      'in_jg_position': 'prev\n', 
                      'jg_offset': 'jg:0',
-                      'gak_offset': f'gak:{int(note_list[-1][self.feature_types.index("gak_offset")][4:])+1}'}
+                      'gak_offset': f'gak:{int(note_list[-1][self.feature_types.index("gak_offset")][4:])+1}'
+                      # 'jangdan': f'jangdan:{int(note_list[-1][self.feature_types.index("jangdan")][8:])}'
+                      }
+      if 'jangdan' in self.feature_types:
+        last_tokens['jangdan'] = f'jangdan:{int(note_list[-1][self.feature_types.index("jangdan")][8:])}'
+      if 'genre' in self.feature_types:
+        last_tokens['genre'] = f'inst:{int(note_list[-1][self.feature_types.index("genre")][5:])}'
       for feature in self.feature_types:
         if feature == 'token': continue
         last_condition.append(last_tokens[feature])
@@ -561,20 +617,28 @@ class JeongganDataset:
   def get_processed_feature(self, condition_insts: List[str], target_inst: str, idx: int, force_target_inst:str=None):
       assert isinstance(condition_insts, list), "front_part_insts should be a list"
       
+      # Retrieve the segment data and metadata using the main index
+      segment_data_dict= self.entire_segments_with_metadata[idx][0]
+      piece_name = self.entire_segments_with_metadata[idx][2]
+
       if force_target_inst:
         source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(force_target_inst)
       else:
-        source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(target_inst)
-      original_source = {inst: self.entire_segments[idx][inst] for inst in condition_insts}
-      original_target = self.entire_segments[idx][target_inst]
+        source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(target_inst)      
+      
+      original_source = {inst: segment_data_dict[inst] for inst in condition_insts}
+      original_target = segment_data_dict[target_inst]
+      num_total_inst = len(segment_data_dict.keys())
+      if '남창' in piece_name or '여창' in piece_name:
+        num_total_inst = 5 # Sometimes geomungo is not included in the data, but actually it is included in the music
 
-      expanded_source = [self.get_inst_and_position_feature(tokens, inst) for inst, tokens in original_source.items()]
+      expanded_source = [self.get_inst_and_position_feature(tokens, inst, num_total_inst) for inst, tokens in original_source.items()]
       expanded_source = [x for sublist in expanded_source for x in sublist]
 
       source = [source_start_token] + expanded_source + [source_end_token]
       if self.is_summarize:
         source = self.summarize_position_tokens(source)
-      target = self.get_inst_and_position_feature(original_target, target_inst)
+      target = self.get_inst_and_position_feature(original_target, target_inst, num_total_inst)
       if self.is_pos_counter:
         target = self.shift_condition(target)
       else:
@@ -589,17 +653,50 @@ class JeongganDataset:
 
       return self.tokenizer(source), self.tokenizer(target), self.tokenizer(shifted_target)
 
+  def get_item_with_target_inst(self, idx, target_inst:str, condition_insts:List[str]=None):
+    assert target_inst in ('daegeum', 'piri', 'haegeum', 'ajaeng', 'gayageum', 'geomungo')
+    segment_data_dict = self.entire_segments_with_metadata[idx][0]
+
+    if condition_insts is None:
+      condition_insts = list(segment_data_dict.keys())
+      condition_insts.remove(target_inst)
+    src, tgt, shifted_tgt = self.get_processed_feature(condition_insts, target_inst, idx)   
+    return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
+
 
   def __getitem__(self, idx):
-    insts_of_piece = list(self.entire_segments[idx].keys())
+    segment_data_dict = self.entire_segments_with_metadata[idx][0]
+    txt_fn = self.entire_segments_with_metadata[idx][1]
+    piece_name = self.entire_segments_with_metadata[idx][2]
+    slice_idx_in_piece = self.entire_segments_with_metadata[idx][3]
+    insts_of_piece = list(segment_data_dict.keys())
+
     if self.is_valid:
-      target_instrument = insts_of_piece[0]
-      condition_instruments = insts_of_piece[1:]
-    else:
+      target_instrument = self.entire_segments_with_metadata[idx][4]
+      condition_instruments = self.entire_segments_with_metadata[idx][5]
+    else:      
       target_instrument = random.choice(insts_of_piece)
-      condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, min(len(insts_of_piece)-1, self.num_max_inst ) ))
+      possible_condition_insts = [inst for inst in insts_of_piece if inst != target_instrument]
+      num_conditions_to_sample = random.randint(1, min(len(possible_condition_insts), self.num_max_inst))
+      condition_instruments = random.sample(possible_condition_insts, num_conditions_to_sample)
+
 
     src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)          
+    
+    start_measure_abs = slice_idx_in_piece 
+    end_measure_abs = slice_idx_in_piece + self.slice_measure_num - 1
+    slice_info_str = f"Piece: {piece_name}, File: {txt_fn}, Slice Index (within piece): {slice_idx_in_piece} (Measures {start_measure_abs}-{end_measure_abs})"
+
+    metadata = {
+        'txt_fn': txt_fn,
+        'piece_name': piece_name,
+        'slice_idx_in_piece': slice_idx_in_piece, 
+        'slice_measure_num': self.slice_measure_num,
+        'slice_info_str': slice_info_str,
+        'target_inst': target_instrument,
+        'condition_insts': condition_instruments
+    }
+    
     return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
 
 class ABCTokenizer:
@@ -658,16 +755,18 @@ class ABCTokenizer:
         if isinstance(idx, list):
           return [self.decode(x) for x in idx]
         return self.vocab[idx]
+
 class ABCDataset(JeongganDataset):
   def __init__(self, data_path= Path('music_score/gen_code'),
               slice_measure_num = 4,
-              is_valid=False,
+              split='train',
               use_pitch_modification=False,
               pitch_modification_ratio=0.3,
               # min_meas=3,
               # max_meas=6,
-              jeonggan_valid_set =['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'],
-              feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'],
+               jeonggan_valid_set =['관악영산회상 염불도드리', '동동', '남창우조 중거', '여창계면 편수대엽', '자진한잎 수룡음 편2', '평조회상 가락덜이'],
+               jeonggan_test_set = ['관악영산회상 가락덜이', '취타 별우조타령', '여창우조 두거', '남창계면 언롱', '남창반우반계 편락', '평조회상 상현도드리', '자진한잎 수룡음 농', '보허자'],
+              feature_types=['token', 'in_jg_position', 'jg_offset', 'gak_offset', 'jangdan', 'inst'],
               # target_instrument='daegeum',
               position_tokens=POSITION,
               piece_list:List[JeongganPiece]=None,
@@ -679,50 +778,28 @@ class ABCDataset(JeongganDataset):
               is_summarize=None):
     super().__init__(data_path=data_path, 
                      slice_measure_num=slice_measure_num, 
-                     is_valid=is_valid, 
+                     split=split, 
                      use_pitch_modification=use_pitch_modification, 
                      pitch_modification_ratio=pitch_modification_ratio, 
                      jeonggan_valid_set=jeonggan_valid_set, 
+                     jeonggan_test_set=jeonggan_test_set,
                      feature_types=feature_types,
                      position_tokens=position_tokens, 
                      piece_list=piece_list, 
                      tokenizer=tokenizer, 
                      is_pos_counter=is_pos_counter,
+                     augment_param=augment_param,
+                     num_max_inst=num_max_inst,
+                     use_offset=False,
                      is_summarize=is_summarize)
-    if self.is_pos_counter:
-      self.feature_types = feature_types
-    else:
-      self.feature_types = [feature_types[0]]+[feature_types[-1]]
-      
-    if piece_list:
-      self.all_pieces = piece_list
-    else:
-      texts = glob.glob(str(data_path / '*.txt'))
-      # all_pieces = [JeongganPiece(text) for text in texts]
-      all_pieces = [ABCPiece(text) for text in texts]
-      self.all_pieces = [x for x in all_pieces if x.is_clean]
-
-    self._get_tokenizer(feature_types, tokenizer)
-    self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
     
+    # if not self.is_pos_counter:
+    #   self.feature_types = [feature_types[0]]+[feature_types[-1]]
 
-    # self.target_instrument = target_instrument
-    # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
-
-    self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
-
-
-    self.all_pieces = [piece for piece in self.all_pieces if (piece.name in jeonggan_valid_set) == is_valid]
-    
-    if self.is_pos_counter:
-      self.feature_types = feature_types
-    else:
-      self.feature_types = [feature_types[0]]+[feature_types[-1]]
-    # self.target_instrument = target_instrument
-    # self.condition_instruments = [PART[i] for i in range(PART.index(target_instrument)+1, len(PART))] 
-
-    self.entire_segments = [segment for piece in self.all_pieces for segment in piece.sliced_parts_by_measure]
+  def _create_pieces(self, texts: List[str], use_offset: bool, slice_measure_num: int) -> List[JeongganPiece]:
+    return [ABCPiece(text, slice_len=slice_measure_num) for text in texts]
   
+
   def _get_tokenizer(self, feature_types, tokenizer:JeongganTokenizer=None):
     if tokenizer:
       self.tokenizer = tokenizer
@@ -736,8 +813,8 @@ class ABCDataset(JeongganDataset):
       assert isinstance(condition_insts, list), "front_part_insts should be a list"
       
       source_start_token, source_end_token, target_start_token, target_end_token = self.prepare_special_tokens(target_inst)
-      original_source = {inst: self.entire_segments[idx][inst] for inst in condition_insts}
-      original_target = self.entire_segments[idx][target_inst]
+      original_source = {inst: self.entire_segments_with_metadata[idx][0][inst] for inst in condition_insts}
+      original_target = self.entire_segments_with_metadata[idx][0][target_inst]
       expanded_source = [token+[inst] for inst, tokens in original_source.items() for token in tokens]
       expanded_target = [token+[target_inst] for token in original_target]
       # expanded_source = [x for sublist in expanded_source for x in sublist]
@@ -747,6 +824,7 @@ class ABCDataset(JeongganDataset):
       if self.is_pos_counter:
         target = self.shift_condition(expanded_target)
       else:
+        source = [[x[0], x[-1]] for x in source]
         expanded_target = [[x[0], x[-1]] for x in   expanded_target]
         target = [target_start_token] + expanded_target + [target_end_token]
 
@@ -774,29 +852,41 @@ class ABCDataset(JeongganDataset):
       return combined
     
   def __getitem__(self, idx):
-    insts_of_piece = list(self.entire_segments[idx].keys())
+    segment_data_dict = self.entire_segments_with_metadata[idx][0]
+    
+    insts_of_piece = list(segment_data_dict.keys())
+
     if self.is_valid:
-      target_instrument = insts_of_piece[0]
-      condition_instruments = insts_of_piece[1:]
+      target_instrument = self.entire_segments_with_metadata[idx][4]
+      condition_instruments = self.entire_segments_with_metadata[idx][5]
     else:
       target_instrument = random.choice(insts_of_piece)
-      condition_instruments = random.sample([inst for inst in insts_of_piece if inst != target_instrument], random.randint(1, len(insts_of_piece)-2))
+      
+      possible_condition_insts = [inst for inst in insts_of_piece if inst != target_instrument]
+      num_conditions_to_sample = random.randint(1, min(len(possible_condition_insts), self.num_max_inst))
+      condition_instruments = random.sample(possible_condition_insts, num_conditions_to_sample)
 
-    
+
     src, tgt, shifted_tgt = self.get_processed_feature(condition_instruments, target_instrument, idx)        
-    return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)    
+    
+    
+    return torch.LongTensor(src), torch.LongTensor(tgt), torch.LongTensor(shifted_tgt)
+
 class JGMaskedDataset(JeongganDataset):
   def __init__(self, data_path='music_score/gen_code', 
                slice_measure_num=4, 
-               is_valid=False, 
-               jeonggan_valid_set=['남창우조 두거', '여창계면 평거', '취타 길타령', '영산회상 중령산', '관악영산회상 염불도드리'], 
+               split='train', 
+               jeonggan_valid_set =['관악영산회상 염불도드리', '동동', '남창우조 중거', '여창계면 편수대엽', '자진한잎 수룡음 편2', '평조회상 가락덜이'],
+               jeonggan_test_set = ['관악영산회상 가락덜이', '취타 별우조타령', '여창우조 두거', '남창계면 언롱', '남창반우반계 편락', '평조회상 상현도드리', '자진한잎 수룡음 농', '보허자'],
                feature_types=['token', 'ornaments', 'in_jg_position', 'jg_offset', 'gak_offset', 'inst'], 
                position_tokens=POSITION, 
                augment_param:dict={},
                piece_list: List[JeongganPiece] = None, 
                tokenizer: JeongganTokenizer = None,
-               num_max_inst:int=6):
-    super().__init__(data_path, slice_measure_num, is_valid, False, False, jeonggan_valid_set=jeonggan_valid_set, feature_types=feature_types, position_tokens=position_tokens, piece_list=piece_list, tokenizer=tokenizer, num_max_inst=num_max_inst)
+               num_max_inst:int=6,
+               use_offset=False,
+               is_pos_counter=True):
+    super().__init__(data_path, slice_measure_num, split, False, False, jeonggan_valid_set=jeonggan_valid_set, jeonggan_test_set=jeonggan_test_set, feature_types=feature_types, position_tokens=position_tokens, piece_list=piece_list, tokenizer=tokenizer, num_max_inst=num_max_inst, is_pos_counter=is_pos_counter)
     self.entire_segments = self.get_entire_segments()
     self.unique_pitches, self.unique_ornaments = self._get_unique_pitch_and_ornaments()
     self.augmentor = Augmentor(self.tokenizer, self.unique_pitches, self.unique_ornaments, **augment_param)
@@ -814,7 +904,7 @@ class JGMaskedDataset(JeongganDataset):
     return sorted(list(unique_pitches)), sorted(list(unique_ornaments))
   
   def _get_tokenizer(self, feature_types, tokenizer:JeongganTokenizer=None):
-    if tokenizer:
+    if tokenizer is not None:
       self.tokenizer = tokenizer
       self.vocab = tokenizer.vocab
     else:
@@ -825,11 +915,16 @@ class JGMaskedDataset(JeongganDataset):
   def get_entire_segments(self):
     entire_segments = []
     for piece in tqdm(self.all_pieces, desc='Converting segments to roll...'):
-      entire_segments += self._get_roll_by_part(piece.sliced_parts_by_measure)
+      num_total_inst = len(piece.sliced_parts_by_measure[0].keys())
+      if '남창' in piece.name or '여창' in piece.name:
+        num_total_inst = 5 # Sometimes geomungo is not included in the data, but actually it is included in the music
+      entire_segments += self._get_roll_by_part(piece.sliced_parts_by_measure, num_total_inst)
     return entire_segments
   
-  def _get_roll_by_part(self, sliced_parts_by_measure:List[Dict[str, List[str]]]):
-    return [{inst: JeongganPiece.convert_tokens_to_roll(tokens, inst) for inst, tokens in meas_data.items()} for meas_data in sliced_parts_by_measure]
+  def _get_roll_by_part(self, sliced_parts_by_measure:List[Dict[str, List[str]]], num_total_inst:int=None):
+    if num_total_inst is None:
+      num_total_inst = len(sliced_parts_by_measure[0].keys())
+    return [{inst: JeongganPiece.convert_tokens_to_roll(tokens, inst, features=self.feature_types, num_total_inst=num_total_inst) for inst, tokens in meas_data.items()} for meas_data in sliced_parts_by_measure]
 
   def prepare_special_tokens(self):
     source_start_token = ['start'] * len(self.feature_types)
@@ -853,6 +948,9 @@ class JGMaskedDataset(JeongganDataset):
     loss_mask = torch.cat([torch.zeros(1, 2), loss_mask, torch.zeros(1,2)])
     return x, correct_x, loss_mask
   
+  def __len__(self):
+    return len(self.entire_segments)
+
   def __getitem__(self, idx):
     insts_of_piece = list(self.entire_segments[idx].keys())
     if self.is_valid:

@@ -30,10 +30,11 @@ The dataset created for this project is uploaded in `music_score/Jeongganbo_data
 ----
 ## Requirements
 
-We used pipenv for our virtual environments. To install the required packages, run the code below. 
+We use ``uv`` for our virtual environments. To install the required packages, run the code below. 
 
 ```
-pipenv install
+uv sync
+uv run python3 train.py
 ```
 
 If you are using other virtual environments, you can install the required packages by running the code below.
@@ -45,11 +46,7 @@ pip install -r requirements.txt
 
 ## Training
 
-First, unzip the dataset using the code below.
-
-```
-unzip music_score/Jeongganbo_dataset.zip -d music_score/
-```
+The training dataset is located in `music_score/jg_cleaned/`.
 
 To train an Encoder-Decoder Transformer for generating orchestral parts, run the code below.
 ```
@@ -77,7 +74,7 @@ unzip model_weights.zip
 To infill the melody of a given melody, run the code below.
 
 ```
-python3 generate_bert.py --input_fn=music_score/chwipunghyeong_gen.txt --output_fn=gen_results/chwipunghyeong_infilled.txt
+python3 generate_bert.py --input_fn=music_score/chwipunghyeong_jg.txt --output_fn=gen_results/chwipunghyeong_infilled.txt
 ```
 
 To generate orchestral parts for a given melody, run the code below.
@@ -87,9 +84,9 @@ python3 generate_ensemble.py --input_fn=gen_results/chwipunghyeong_infilled.txt 
 ```
 
 The generated music will be saved in the parent of `output_fn`. Six files will be saved:
-- `output_fn_gen.txt`: The generated orchestration in JG-like encoding
+- `output_fn_jg.txt`: The generated orchestration in JG-like encoding
 - `output_fn_omr.txt`: The generated orchestration converted to encoding scheme of Jeongganbo OMR, which can be used for Jeongganbo notation rendering.
-- `output_fn_gen.musicxml`: The generated orchestration in MusicXML format.
+- `output_fn_jg.musicxml`: The generated orchestration in MusicXML format.
 - `output_fn_cycle`: The result after the refinement process.
 
 ----
