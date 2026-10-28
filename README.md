@@ -30,6 +30,8 @@ The dataset created for this project is uploaded in `music_score/Jeongganbo_data
 ----
 ## Requirements
 
+This project requires Python 3.11 (Pillow 13 needs Python >= 3.11, and torch 2.0.1 supports up to 3.11).
+
 We use ``uv`` for our virtual environments. To install the required packages, run the code below. 
 
 ```
